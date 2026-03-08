@@ -1,29 +1,19 @@
-const initSqlJs = require('sql.js');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
-const path = require('path');
-const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, 'sc_landing.db');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+});
 
-let db = null;
-
-function saveDb() {
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
+// Convert ? placeholders to $1, $2, ... for PostgreSQL
+function pg(sql) {
+  let i = 0;
+  return sql.replace(/\?/g, () => '$' + (++i));
 }
 
 async function initDb() {
-  const SQL = await initSqlJs();
-
-  if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -34,7 +24,7 @@ async function initDb() {
       created TEXT
     )
   `);
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS pages (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -43,7 +33,7 @@ async function initDb() {
       created TEXT
     )
   `);
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS versions (
       id TEXT PRIMARY KEY,
       page_id TEXT NOT NULL,
@@ -56,7 +46,7 @@ async function initDb() {
       active INTEGER DEFAULT 0
     )
   `);
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS domains (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -71,24 +61,24 @@ async function initDb() {
       created TEXT
     )
   `);
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS activity (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       action TEXT,
       details TEXT,
       user_name TEXT,
       date TEXT
     )
   `);
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
     )
   `);
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bot_blocks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       ip TEXT NOT NULL,
       user_agent TEXT,
       reason TEXT NOT NULL,
@@ -97,25 +87,25 @@ async function initDb() {
       created TEXT NOT NULL
     )
   `);
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bot_ip_list (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       ip TEXT NOT NULL,
       list_type TEXT NOT NULL,
       note TEXT,
       created TEXT
     )
   `);
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS visitor_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       ip TEXT NOT NULL,
       country_code TEXT,
       country_name TEXT,
       region_name TEXT,
       city_name TEXT,
-      latitude REAL,
-      longitude REAL,
+      latitude DOUBLE PRECISION,
+      longitude DOUBLE PRECISION,
       isp TEXT,
       domain TEXT,
       usage_type TEXT,
@@ -130,40 +120,41 @@ async function initDb() {
   `);
 
   // Seed default admin
-  const adminCheck = db.exec("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
-  if (adminCheck.length === 0 || adminCheck[0].values.length === 0) {
+  const adminCheck = await pool.query("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
+  if (adminCheck.rows.length === 0) {
     const hash = bcrypt.hashSync('admin123', 10);
     const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-    db.run('INSERT INTO users (id, name, email, password, role, status, created) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    await pool.query(
+      'INSERT INTO users (id, name, email, password, role, status, created) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       [id, 'Admin', 'admin@admin.com', hash, 'Admin', 'Active', new Date().toISOString().split('T')[0]]
     );
-    saveDb();
     console.log('Default admin created: admin@admin.com / admin123');
   }
-
-  return db;
 }
 
-// Helper to run queries and return results as array of objects
-function queryAll(sql, params) {
-  const stmt = db.prepare(sql);
-  if (params) stmt.bind(params);
-  const results = [];
-  while (stmt.step()) {
-    results.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return results;
+async function queryAll(sql, params) {
+  const result = await pool.query(pg(sql), params);
+  return result.rows;
 }
 
-function queryOne(sql, params) {
-  const rows = queryAll(sql, params);
-  return rows.length > 0 ? rows[0] : null;
+async function queryOne(sql, params) {
+  const result = await pool.query(pg(sql), params);
+  return result.rows.length > 0 ? result.rows[0] : null;
 }
 
-function runSql(sql, params) {
-  db.run(sql, params);
-  saveDb();
+async function runSql(sql, params) {
+  await pool.query(pg(sql), params);
 }
 
-module.exports = { initDb, queryAll, queryOne, runSql, saveDb, getDb: () => db };
+// Raw query (no placeholder conversion — use $1, $2 directly)
+async function rawQueryAll(sql, params) {
+  const result = await pool.query(sql, params);
+  return result.rows;
+}
+
+async function rawQueryOne(sql, params) {
+  const result = await pool.query(sql, params);
+  return result.rows.length > 0 ? result.rows[0] : null;
+}
+
+module.exports = { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne };
