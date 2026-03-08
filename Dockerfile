@@ -20,7 +20,7 @@ RUN npm install --production
 
 COPY --from=builder /app/client/dist ./client/dist
 COPY server.js db.js ./
-COPY uploads ./uploads
+RUN mkdir -p uploads
 
 EXPOSE 3000
 
