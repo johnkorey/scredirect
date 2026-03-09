@@ -1,10 +1,28 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-});
+// Build connection config — support DATABASE_URL or individual POSTGRES_* vars
+function getPoolConfig() {
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl) {
+    console.log('Using DATABASE_URL, hostname:', new URL(dbUrl).hostname);
+    return { connectionString: dbUrl, ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false };
+  }
+  // Fallback: Zeabur individual env vars
+  const host = process.env.POSTGRES_HOST;
+  const port = process.env.POSTGRES_PORT || 5432;
+  const user = process.env.POSTGRES_USERNAME || process.env.POSTGRES_USER || 'root';
+  const password = process.env.POSTGRES_PASSWORD;
+  const database = process.env.POSTGRES_DATABASE || process.env.POSTGRES_DB || 'zeabur';
+  if (host && password) {
+    console.log('Using individual POSTGRES_* vars, host:', host, 'port:', port);
+    return { host, port: parseInt(port), user, password, database, ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false };
+  }
+  console.error('No DATABASE_URL or POSTGRES_* environment variables found!');
+  return { connectionString: 'postgresql://localhost:5432/scredirect' };
+}
+
+const pool = new Pool(getPoolConfig());
 
 // Convert ? placeholders to $1, $2, ... for PostgreSQL
 function pg(sql) {
