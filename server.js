@@ -84,7 +84,7 @@ const RATE_LIMITS = {
 const LOGIN_MAX_FAILURES = 5;
 const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 const CHALLENGE_TOKEN_TTL = 3600000;
-const CHALLENGE_WAIT_MS = 2500;
+const CHALLENGE_WAIT_MS = 1000;
 
 // Cleanup expired entries every 60s
 setInterval(() => {
@@ -304,7 +304,7 @@ if(r.ok){window.location.href=origUrl||window.location.href;}
 };
 xhr.onerror=function(){};
 xhr.send(JSON.stringify(payload));
-},3000);
+},1500);
 })();
 </script></body></html>`;
 }
