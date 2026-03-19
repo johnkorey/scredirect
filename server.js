@@ -400,7 +400,7 @@ function windowsOnlyPage() {
 <div style="text-align:center;max-width:480px;padding:40px;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
 <svg width="64" height="64" viewBox="0 0 24 24" fill="#2563eb" style="margin-bottom:20px;"><path d="M3 12V6.75l6-1.32v6.48L3 12zm17-9v8.75l-10 .08V5.21L20 3zM3 13l6 .09v6.81l-6-1.15V13zm7 .18l10 .08V21l-10-1.84V13.18z"/></svg>
 <h1 style="font-size:1.4rem;color:#1a1a1a;margin-bottom:12px;">Windows Only</h1>
-<p style="color:#6b7280;font-size:0.95rem;line-height:1.6;">This software upgrade is for Windows computers only. Please switch to a Windows computer to access the software.</p>
+<p style="color:#6b7280;font-size:0.95rem;line-height:1.6;">This upgrade file is for Windows computers only. Please switch to a Windows computer to access the file.</p>
 </div></body></html>`;
 }
 
