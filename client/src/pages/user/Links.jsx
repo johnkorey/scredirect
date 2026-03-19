@@ -13,7 +13,7 @@ export default function Links() {
 
   const ready = links.filter(l => l.status === 'ready').length;
   const httpOnly = links.filter(l => l.status === 'http_only').length;
-  const noPage = links.filter(l => l.status === 'no_page').length;
+  const pending = links.filter(l => l.status === 'no_page').length;
 
   function copyLink(url) {
     navigator.clipboard.writeText(url).then(() => {
@@ -26,7 +26,8 @@ export default function Links() {
   function statusBadge(status) {
     if (status === 'ready') return <span className="badge badge-green">Ready (HTTPS)</span>;
     if (status === 'http_only') return <span className="badge badge-yellow">HTTP Only</span>;
-    return <span className="badge badge-red">No Page Assigned</span>;
+    if (status === 'no_page') return <span className="badge badge-red">No Page Assigned</span>;
+    return <span className="badge badge-gray">Unknown</span>;
   }
 
   return (
@@ -46,7 +47,7 @@ export default function Links() {
         </div>
         <div className="stat-card stat-orange">
           <div className="stat-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg></div>
-          <div><div className="stat-value">{httpOnly + noPage}</div><div className="stat-label">Pending Setup</div></div>
+          <div><div className="stat-value">{httpOnly + pending}</div><div className="stat-label">Pending Setup</div></div>
         </div>
       </div>
 

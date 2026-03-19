@@ -139,6 +139,17 @@ async function initDb() {
     )
   `);
 
+  // Session table for persistent login
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "session" (
+      "sid" VARCHAR NOT NULL COLLATE "default",
+      "sess" JSON NOT NULL,
+      "expire" TIMESTAMP(6) NOT NULL,
+      CONSTRAINT "session_pkey" PRIMARY KEY ("sid")
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")`);
+
   // Migrations for existing tables
   try { await pool.query("ALTER TABLE domains ADD COLUMN dns_verified INTEGER DEFAULT 0"); } catch(e) { /* column exists */ }
   try { await pool.query("ALTER TABLE versions ADD COLUMN link_url TEXT"); } catch(e) { /* column exists */ }
@@ -181,4 +192,4 @@ async function rawQueryOne(sql, params) {
   return result.rows.length > 0 ? result.rows[0] : null;
 }
 
-module.exports = { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne };
+module.exports = { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne, pool };

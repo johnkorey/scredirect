@@ -7,7 +7,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
 const dns = require('dns').promises;
-const { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne } = require('./db');
+const { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne, pool } = require('./db');
+const pgSession = require('connect-pg-simple')(session);
 
 const app = express();
 app.set('trust proxy', false);
@@ -17,6 +18,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
+  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
@@ -1038,21 +1040,21 @@ app.get('/api/links', requireAuth, async (req, res) => {
     [req.session.user.id]
   );
   const results = links.map(d => {
-    const protocol = d.ssl_active ? 'https' : 'http';
     let status = 'no_page';
+    let link = '';
     if (d.page_id && d.page_name) {
+      const protocol = d.ssl_active ? 'https' : 'http';
       status = d.ssl_active ? 'ready' : 'http_only';
+      link = protocol + '://' + d.domain + '/page/' + d.page_id;
     }
     return {
       id: d.id,
       domain: d.domain,
       page_id: d.page_id,
       page_name: d.page_name || null,
-      link: protocol + '://' + d.domain,
-      ssl_active: d.ssl_active,
-      dns_type: d.dns_type,
-      dns_value: d.dns_value,
+      link: link,
       status: status,
+      ssl_active: !!d.ssl_active,
       created: d.created
     };
   });
