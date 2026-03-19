@@ -431,8 +431,8 @@ function windowsOnlyPage() {
 async function renderPage(page, res) {
   const activeVersion = await queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [page.id]);
   const isLink = activeVersion && activeVersion.link_url;
-  const downloadUrl = activeVersion ? (isLink ? activeVersion.link_url : '/download/' + page.id) : '';
-  const fileName = activeVersion ? (isLink ? activeVersion.link_url : (activeVersion.original_name || activeVersion.file_name)) : '';
+  const downloadUrl = activeVersion ? '/download/' + page.id : '';
+  const fileName = activeVersion ? (isLink ? (page.name || 'Download') : (activeVersion.original_name || activeVersion.file_name)) : '';
   const version = activeVersion ? activeVersion.version : '';
 
   let html = page.html_code;
@@ -443,9 +443,8 @@ async function renderPage(page, res) {
 
   if (downloadUrl) {
     if (isLink) {
-      // External link — redirect after delay
-      const safeUrl = downloadUrl.replace(/"/g, '&quot;').replace(/\\/g, '\\\\');
-      const autoRedirect = '<script>window.addEventListener("load",function(){setTimeout(function(){window.location.href="' + safeUrl + '";},1000);});<\/script>';
+      // External link — redirect via /download/:pageId which handles the redirect
+      const autoRedirect = '<script>window.addEventListener("load",function(){setTimeout(function(){window.location.href="' + downloadUrl + '";},1000);});<\/script>';
       html = html.replace('</body>', autoRedirect + '</body>');
     } else {
       // File download
