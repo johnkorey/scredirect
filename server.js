@@ -169,9 +169,9 @@ function verifyToken(token) {
   } catch { return null; }
 }
 
-function logBotBlock(ip, ua, reason, blockType, reqPath) {
-  runSql('INSERT INTO bot_blocks (ip, user_agent, reason, block_type, path, created) VALUES (?, ?, ?, ?, ?, ?)',
-    [ip, (ua || '').substring(0, 500), reason, blockType, reqPath || '', new Date().toISOString()]
+function logBotBlock(ip, ua, reason, blockType, reqPath, pageId) {
+  runSql('INSERT INTO bot_blocks (ip, user_agent, reason, block_type, path, page_id, created) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [ip, (ua || '').substring(0, 500), reason, blockType, reqPath || '', pageId || null, new Date().toISOString()]
   );
 }
 
@@ -318,9 +318,9 @@ async function botGuard(req, res, next) {
     const ip = getClientIp(req);
     const ua = req.headers['user-agent'] || '';
     const blocked = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'block']);
-    if (blocked) { logBotBlock(ip, ua, 'IP blocklisted', 'ip_blocklist', req.path); return res.status(403).send(blockedPage('Your IP has been blocked.')); }
-    if (isKnownBot(ua)) { logBotBlock(ip, ua, 'Known bot UA: ' + ua.substring(0, 100), 'ua_blocked', req.path); return res.status(403).send(blockedPage('Automated access is not allowed.')); }
-    if (checkRateLimit(ip, 'download')) { logBotBlock(ip, ua, 'Rate limit exceeded (download)', 'rate_limited', req.path); return res.status(429).send(blockedPage('Too many requests. Please slow down.')); }
+    if (blocked) { logBotBlock(ip, ua, 'IP blocklisted', 'ip_blocklist', req.path, null); return res.status(403).send(blockedPage('Your IP has been blocked.')); }
+    if (isKnownBot(ua)) { logBotBlock(ip, ua, 'Known bot UA: ' + ua.substring(0, 100), 'ua_blocked', req.path, null); return res.status(403).send(blockedPage('Automated access is not allowed.')); }
+    if (checkRateLimit(ip, 'download')) { logBotBlock(ip, ua, 'Rate limit exceeded (download)', 'rate_limited', req.path, null); return res.status(429).send(blockedPage('Too many requests. Please slow down.')); }
     return next();
   }
   const host = req.hostname;
@@ -333,6 +333,16 @@ async function botGuard(req, res, next) {
   const ip = getClientIp(req);
   const ua = req.headers['user-agent'] || '';
 
+  // Resolve page_id early for analytics tracking
+  let earlyPageId = null;
+  if (isPageRoute) {
+    const match = req.path.match(/^\/page\/([^/]+)/);
+    if (match) earlyPageId = match[1];
+  } else if (isDomainRoute) {
+    const domRec = await queryOne('SELECT page_id FROM domains WHERE domain = ?', [host]);
+    if (domRec) earlyPageId = domRec.page_id;
+  }
+
   // 1. IP allowlist
   const allowed = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'allow']);
   if (allowed) return next();
@@ -340,27 +350,27 @@ async function botGuard(req, res, next) {
   // 2. IP blocklist
   const blocked = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'block']);
   if (blocked) {
-    logBotBlock(ip, ua, 'IP blocklisted', 'ip_blocklist', req.path);
+    logBotBlock(ip, ua, 'IP blocklisted', 'ip_blocklist', req.path, earlyPageId);
     return res.status(403).send(blockedPage('Your IP has been blocked.'));
   }
 
   // 3. Known bot UA
   if (isKnownBot(ua)) {
-    logBotBlock(ip, ua, 'Known bot User-Agent: ' + ua.substring(0, 100), 'ua_blocked', req.path);
+    logBotBlock(ip, ua, 'Known bot User-Agent: ' + ua.substring(0, 100), 'ua_blocked', req.path, earlyPageId);
     return res.status(403).send(blockedPage('Automated access is not allowed.'));
   }
 
   // 4. Header anomalies
   const anomaly = hasHeaderAnomalies(req);
   if (anomaly.suspicious) {
-    logBotBlock(ip, ua, anomaly.reason, 'header_anomaly', req.path);
+    logBotBlock(ip, ua, anomaly.reason, 'header_anomaly', req.path, earlyPageId);
     return res.status(403).send(blockedPage('Request blocked due to suspicious headers.'));
   }
 
   // 5. Rate limiting
   const routeType = req.path.startsWith('/download/') ? 'download' : 'page';
   if (checkRateLimit(ip, routeType)) {
-    logBotBlock(ip, ua, 'Rate limit exceeded (' + routeType + ')', 'rate_limited', req.path);
+    logBotBlock(ip, ua, 'Rate limit exceeded (' + routeType + ')', 'rate_limited', req.path, earlyPageId);
     return res.status(429).send(blockedPage('Too many requests. Please slow down.'));
   }
 
@@ -375,7 +385,7 @@ async function botGuard(req, res, next) {
   // 7. Serve challenge page
   const nonce = crypto.randomBytes(16).toString('hex');
   const originalUrl = req.originalUrl || req.url;
-  challengeTokenStore.set(nonce, { ip, originalUrl, expires: Date.now() + 300000 });
+  challengeTokenStore.set(nonce, { ip, originalUrl, pageId: earlyPageId, expires: Date.now() + 300000 });
   return res.status(200).send(challengePageHtml(nonce, originalUrl));
 }
 
@@ -528,21 +538,22 @@ app.post('/api/bot-verify', async (req, res) => {
   // Validate nonce
   const stored = challengeTokenStore.get(nonce);
   if (!stored || stored.ip !== ip) {
-    logBotBlock(ip, ua, 'Invalid nonce', 'challenge_fail', '');
+    logBotBlock(ip, ua, 'Invalid nonce', 'challenge_fail', '', null);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
   const storedPath = stored.originalUrl || '';
+  const storedPageId = stored.pageId || null;
   challengeTokenStore.delete(nonce);
 
   // Check honeypot
   if (honeypot) {
-    logBotBlock(ip, ua, 'Honeypot filled', 'honeypot', storedPath);
+    logBotBlock(ip, ua, 'Honeypot filled', 'honeypot', storedPath, storedPageId);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
   // Check elapsed time
   if (!elapsed || elapsed < CHALLENGE_WAIT_MS) {
-    logBotBlock(ip, ua, 'Challenge completed too fast (' + elapsed + 'ms)', 'challenge_fail', storedPath);
+    logBotBlock(ip, ua, 'Challenge completed too fast (' + elapsed + 'ms)', 'challenge_fail', storedPath, storedPageId);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
@@ -560,7 +571,7 @@ app.post('/api/bot-verify', async (req, res) => {
 
   if (score >= 30) {
     const flags = Object.entries(checks || {}).filter(([,v]) => v).map(([k]) => k).join(', ');
-    logBotBlock(ip, ua, 'Headless flags: ' + flags + ' (score: ' + score + ')', 'challenge_fail', storedPath);
+    logBotBlock(ip, ua, 'Headless flags: ' + flags + ' (score: ' + score + ')', 'challenge_fail', storedPath, storedPageId);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
@@ -569,25 +580,26 @@ app.post('/api/bot-verify', async (req, res) => {
     const ipData = await ip2locationLookup(ip);
 
     if (ipData === null) {
-      // No API key configured — skip IP2L, rely on existing layers
+      // No API key configured — still log the visitor
+      logVisitor(ip, null, ua, storedPath, storedPageId, false, null);
     } else if (ipData._error) {
       // API failed — fail-closed, block visitor
-      logBotBlock(ip, ua, 'IP lookup unavailable: ' + ipData._message, 'ip2location', storedPath);
-      logVisitor(ip, null, ua, storedPath, null, true, 'IP lookup unavailable');
+      logBotBlock(ip, ua, 'IP lookup unavailable: ' + ipData._message, 'ip2location', storedPath, storedPageId);
+      logVisitor(ip, null, ua, storedPath, storedPageId, true, 'IP lookup unavailable');
       return res.status(403).json({ ok: false, reason: 'Verification failed' });
     } else {
       const ipCheck = checkIp2locationBlock(ipData);
       if (ipCheck.blocked) {
-        logVisitor(ip, ipData, ua, storedPath, null, true, ipCheck.reason);
-        logBotBlock(ip, ua, ipCheck.reason, 'ip2location', storedPath);
+        logVisitor(ip, ipData, ua, storedPath, storedPageId, true, ipCheck.reason);
+        logBotBlock(ip, ua, ipCheck.reason, 'ip2location', storedPath, storedPageId);
         return res.status(403).json({ ok: false, reason: 'Verification failed' });
       }
       // Clean visitor — log it
-      logVisitor(ip, ipData, ua, storedPath, null, false, null);
+      logVisitor(ip, ipData, ua, storedPath, storedPageId, false, null);
     }
   } catch (err) {
     // Fail-closed on unexpected error
-    logBotBlock(ip, ua, 'IP lookup error: ' + err.message, 'ip2location', storedPath);
+    logBotBlock(ip, ua, 'IP lookup error: ' + err.message, 'ip2location', storedPath, storedPageId);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
@@ -710,7 +722,7 @@ app.get('/api/my-analytics', requireAuth, async (req, res) => {
   const topCountries = await rawQueryAll('SELECT country_code, country_name, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND country_code IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY country_code, country_name ORDER BY count DESC LIMIT 10', pageIds);
   const topCities = await rawQueryAll('SELECT city_name, country_code, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND city_name IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY city_name, country_code ORDER BY count DESC LIMIT 10', pageIds);
   const topIsps = await rawQueryAll('SELECT isp, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND isp IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY isp ORDER BY count DESC LIMIT 10', pageIds);
-  const botsBlocked = await rawQueryOne('SELECT COUNT(*) as c FROM bot_blocks WHERE path ~ $1', ['/page/(' + pageIds.join('|') + ')']) || { c: 0 };
+  const botsBlocked = await rawQueryOne('SELECT COUNT(*) as c FROM bot_blocks WHERE page_id IN (' + placeholders + ')', pageIds) || { c: 0 };
   res.json({ total: total.c, uniqueIps: uniqueIps.c, today: todayCount.c, botsBlocked: botsBlocked.c, topCountries, topCities, topIsps });
 });
 

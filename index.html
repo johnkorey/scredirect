@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download</title>
+</head>
+<body>
+    <script>
+        function getPage() {
+            var params = new URLSearchParams(window.location.search);
+            var pageId = params.get('page');
+            try {
+                var pages = JSON.parse(localStorage.getItem('sc_pages') || '[]');
+                if (pageId) {
+                    var page = pages.find(function(p) { return p.id === pageId; });
+                    if (page) return page;
+                }
+                // Fallback: first active page
+                var active = pages.find(function(p) { return p.status === 'active'; });
+                if (active) return active;
+                // Fallback: first page
+                if (pages.length > 0) return pages[0];
+            } catch (e) {}
+            return null;
+        }
+
+        var page = getPage();
+
+        if (page && page.htmlCode) {
+            // Get active version info
+            var activeVersion = (page.versions || []).find(function(v) { return v.active; });
+            var fileUrl = activeVersion ? activeVersion.fileUrl : '';
+            var fileName = activeVersion ? activeVersion.fileName : '';
+            var version = activeVersion ? activeVersion.version : '';
+
+            // Replace placeholders in HTML
+            var html = page.htmlCode;
+            html = html.replace(/\{\{download_url\}\}/g, fileUrl);
+            html = html.replace(/\{\{file_name\}\}/g, fileName);
+            html = html.replace(/\{\{version\}\}/g, version);
+            html = html.replace(/\{\{app_name\}\}/g, page.name || '');
+
+            // Inject auto-download script if a file URL is available
+            if (fileUrl) {
+                var autoDownloadScript = '<script>'
+                    + 'window.addEventListener("load", function() {'
+                    + '  setTimeout(function() {'
+                    + '    var a = document.createElement("a");'
+                    + '    a.href = ' + JSON.stringify(fileUrl) + ';'
+                    + '    a.download = ' + JSON.stringify(fileName || 'download') + ';'
+                    + '    document.body.appendChild(a);'
+                    + '    a.click();'
+                    + '    document.body.removeChild(a);'
+                    + '  }, 1000);'
+                    + '});'
+                    + '<\/script>';
+                html = html.replace('</body>', autoDownloadScript + '</body>');
+            }
+
+            document.title = page.name || 'Download';
+            document.open();
+            document.write(html);
+            document.close();
+        } else {
+            document.title = 'Page Not Found';
+            document.body.style.cssText = 'font-family:Segoe UI,sans-serif;background:#0a0e1a;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;';
+            document.body.innerHTML = '<div style="text-align:center;"><h1 style="font-size:1.5rem;margin-bottom:12px;color:#fff;">No Landing Page Found</h1><p style="color:#64748b;">No landing page has been created yet. Ask your admin to add one.</p></div>';
+        }
+    </script>
+
+</body>
+</html>

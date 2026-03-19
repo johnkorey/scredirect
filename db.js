@@ -153,6 +153,7 @@ async function initDb() {
   // Migrations for existing tables
   try { await pool.query("ALTER TABLE domains ADD COLUMN dns_verified INTEGER DEFAULT 0"); } catch(e) { /* column exists */ }
   try { await pool.query("ALTER TABLE versions ADD COLUMN link_url TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE bot_blocks ADD COLUMN page_id TEXT"); } catch(e) { /* column exists */ }
 
   // Seed default admin
   const adminCheck = await pool.query("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
