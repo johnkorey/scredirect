@@ -313,8 +313,16 @@ xhr.send(JSON.stringify(payload));
 async function botGuard(req, res, next) {
   // Only protect public page/download routes and custom domain requests
   const isPageRoute = req.path.startsWith('/page/');
-  // Skip challenge for /download/ — already protected by the landing page challenge
-  if (req.path.startsWith('/download/')) return next();
+  // /download/ — skip challenge but still enforce rate limit, blocklist, and bot UA checks
+  if (req.path.startsWith('/download/')) {
+    const ip = getClientIp(req);
+    const ua = req.headers['user-agent'] || '';
+    const blocked = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'block']);
+    if (blocked) { logBotBlock(ip, ua, 'IP blocklisted', 'ip_blocklist', req.path); return res.status(403).send(blockedPage('Your IP has been blocked.')); }
+    if (isKnownBot(ua)) { logBotBlock(ip, ua, 'Known bot UA: ' + ua.substring(0, 100), 'ua_blocked', req.path); return res.status(403).send(blockedPage('Automated access is not allowed.')); }
+    if (checkRateLimit(ip, 'download')) { logBotBlock(ip, ua, 'Rate limit exceeded (download)', 'rate_limited', req.path); return res.status(429).send(blockedPage('Too many requests. Please slow down.')); }
+    return next();
+  }
   const host = req.hostname;
   const isDomainRoute = host !== 'localhost' && host !== '127.0.0.1' &&
     !req.path.startsWith('/api/') && !req.path.startsWith('/uploads/') &&
