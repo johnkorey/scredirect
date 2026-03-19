@@ -1050,7 +1050,6 @@ app.get('/api/links', requireAuth, async (req, res) => {
       page_id: d.page_id,
       page_name: d.page_name || null,
       link: protocol + '://' + d.domain,
-      fallback_link: d.page_id ? '/page/' + d.page_id : null,
       ssl_active: d.ssl_active,
       dns_type: d.dns_type,
       dns_value: d.dns_value,

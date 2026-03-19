@@ -58,7 +58,7 @@ export default function Links() {
           </div>
         ) : (
           <table className="data-table">
-            <thead><tr><th>Domain</th><th>Landing Page</th><th>Generated Link</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Domain</th><th>Landing Page</th><th>Your Link</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {links.map(l => (
                 <tr key={l.id}>
@@ -74,21 +74,11 @@ export default function Links() {
                         Copy
                       </button>
                     </div>
-                    {l.fallback_link && (
-                      <div style={{ marginTop: 4 }}>
-                        <span style={{ fontSize: '0.72rem', color: '#475569' }}>Direct: </span>
-                        <code style={{ fontSize: '0.72rem', color: '#64748b', cursor: 'pointer' }} onClick={() => copyLink(window.location.origin + l.fallback_link)}>
-                          {window.location.origin}{l.fallback_link}
-                        </code>
-                      </div>
-                    )}
                   </td>
                   <td>{statusBadge(l.status)}</td>
                   <td>
                     <div className="btn-row">
-                      {l.fallback_link && (
-                        <a className="btn btn-outline btn-sm" href={l.fallback_link} target="_blank" rel="noopener">Preview</a>
-                      )}
+                      <a className="btn btn-outline btn-sm" href={l.link} target="_blank" rel="noopener">Preview</a>
                       <button className="btn btn-outline btn-sm" onClick={() => copyLink(l.link)}>
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
                         Copy Link
@@ -104,16 +94,16 @@ export default function Links() {
 
       <div className="section-card" style={{ marginTop: 20 }}>
         <h3>How Links Work</h3>
-        <p className="desc">Your generated links route visitors to the assigned landing page.</p>
+        <p className="desc">Your links route visitors through your custom domain to the assigned landing page.</p>
         <div style={{ padding: 14, background: '#0f1117', borderRadius: 8, fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.8 }}>
           <strong style={{ color: '#f1f5f9' }}>1. Add a Domain</strong><br/>
           Go to <a href="/user/domains" style={{ color: '#818cf8' }}>My Domains</a> and add your custom domain.<br/><br/>
           <strong style={{ color: '#f1f5f9' }}>2. Assign a Landing Page</strong><br/>
           Link the domain to a landing page in the domain settings.<br/><br/>
-          <strong style={{ color: '#f1f5f9' }}>3. Configure DNS</strong><br/>
-          Point your domain's DNS to this server. Once DNS propagates, visitors to your domain will see the landing page.<br/><br/>
-          <strong style={{ color: '#f1f5f9' }}>4. Share the Link</strong><br/>
-          Copy and share the generated link. The "Direct" link works immediately without DNS setup.<br/><br/>
+          <strong style={{ color: '#f1f5f9' }}>3. Configure DNS & Verify</strong><br/>
+          Set up the A record shown in the DNS guide, then click "Verify DNS" to confirm propagation.<br/><br/>
+          <strong style={{ color: '#f1f5f9' }}>4. Share Your Link</strong><br/>
+          Copy your custom domain link and share it. Visitors will see the landing page and get redirected to the download (file or external link).<br/><br/>
           <strong style={{ color: '#f1f5f9' }}>Note:</strong> Non-Windows visitors will see a message that the software is for Windows only.
         </div>
       </div>
