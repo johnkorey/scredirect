@@ -312,7 +312,9 @@ xhr.send(JSON.stringify(payload));
 // Bot guard middleware
 async function botGuard(req, res, next) {
   // Only protect public page/download routes and custom domain requests
-  const isPageRoute = req.path.startsWith('/page/') || req.path.startsWith('/download/');
+  const isPageRoute = req.path.startsWith('/page/');
+  // Skip challenge for /download/ — already protected by the landing page challenge
+  if (req.path.startsWith('/download/')) return next();
   const host = req.hostname;
   const isDomainRoute = host !== 'localhost' && host !== '127.0.0.1' &&
     !req.path.startsWith('/api/') && !req.path.startsWith('/uploads/') &&
