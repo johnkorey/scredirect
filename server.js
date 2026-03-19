@@ -481,8 +481,8 @@ app.use(async (req, res, next) => {
   const host = req.hostname;
   if (host === 'localhost' || host === '127.0.0.1' || req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/assets/')) return next();
 
-  const domainRecord = await queryOne('SELECT d.page_id, p.id as pid, p.html_code, p.name, p.status FROM domains d LEFT JOIN pages p ON d.page_id = p.id WHERE d.domain = ?', [host]);
-  if (!domainRecord || !domainRecord.page_id || !domainRecord.html_code) return next();
+  const domainRecord = await queryOne('SELECT p.id, p.html_code, p.name, p.status FROM domains d LEFT JOIN pages p ON d.page_id = p.id WHERE d.domain = ?', [host]);
+  if (!domainRecord || !domainRecord.id || !domainRecord.html_code) return next();
 
   // Windows-only check
   if (!isWindows(req.headers['user-agent'])) return res.send(windowsOnlyPage());
