@@ -426,6 +426,49 @@ async function renderPage(page, res) {
   html = html.replace(/\{\{version\}\}/g, version);
   html = html.replace(/\{\{app_name\}\}/g, page.name || '');
 
+  // Inject download helper — triggers download without navigating away, then shows completion
+  if (downloadUrl) {
+    const dlHelper = `
+<iframe id="sc-dl-frame" name="sc-dl-frame" style="display:none"></iframe>
+<script>
+(function(){
+  var dlUrl="${downloadUrl}";
+  var isLink=${isLink ? 'true' : 'false'};
+  function triggerDownload(){
+    if(isLink){
+      window.open(dlUrl,"sc-dl-frame");
+    }else{
+      var a=document.createElement("a");a.href=dlUrl;a.download="${fileName.replace(/"/g, '')}";a.style.display="none";document.body.appendChild(a);a.click();document.body.removeChild(a);
+    }
+    setTimeout(function(){
+      var s=document.getElementById("status")||document.getElementById("sc-dl-status");
+      if(s){s.innerText="Download completed! ✅";s.style.color="#16a34a";}
+      var p=document.getElementById("progress");
+      if(p){p.style.width="100%";p.style.background="#16a34a";}
+      var m=document.querySelector(".manual");
+      if(m){m.innerHTML='<span style="color:#16a34a;font-weight:600">✅ Download completed successfully</span>';}
+    },1500);
+  }
+  window.__scDownload=triggerDownload;
+  var origHref=Object.getOwnPropertyDescriptor(window.location.__proto__||Object.getPrototypeOf(window.location),"href");
+  if(origHref&&origHref.set){
+    var origSet=origHref.set;
+    Object.defineProperty(window.location,"href",{set:function(v){
+      if(v===dlUrl){triggerDownload();return;}
+      origSet.call(window.location,v);
+    },get:origHref.get});
+  }
+})();
+</scr`+'ipt>';
+
+    const bodyClose2 = html.match(/<\/body>/i);
+    if (bodyClose2) {
+      html = html.replace(bodyClose2[0], dlHelper + bodyClose2[0]);
+    } else {
+      html += dlHelper;
+    }
+  }
+
   // Only inject floating bar + auto-download if the template does NOT already handle downloads
   const templateHandlesDownload = page.html_code.includes('{{download_url}}');
 
