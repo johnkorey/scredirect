@@ -4,3 +4,4 @@ uploads/
 client/dist/
 .env
 .DS_Store
+*.exe
