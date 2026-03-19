@@ -59,6 +59,7 @@ async function initDb() {
       file_name TEXT,
       file_path TEXT,
       original_name TEXT,
+      link_url TEXT,
       notes TEXT,
       date TEXT,
       active INTEGER DEFAULT 0
@@ -75,6 +76,7 @@ async function initDb() {
       auto_ssl INTEGER DEFAULT 1,
       ssl_active INTEGER DEFAULT 0,
       ssl_date TEXT,
+      dns_verified INTEGER DEFAULT 0,
       notes TEXT,
       created TEXT
     )
@@ -136,6 +138,10 @@ async function initDb() {
       created TEXT NOT NULL
     )
   `);
+
+  // Migrations for existing tables
+  try { await pool.query("ALTER TABLE domains ADD COLUMN dns_verified INTEGER DEFAULT 0"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE versions ADD COLUMN link_url TEXT"); } catch(e) { /* column exists */ }
 
   // Seed default admin
   const adminCheck = await pool.query("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");

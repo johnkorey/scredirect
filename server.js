@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
+const dns = require('dns').promises;
 const { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne } = require('./db');
 
 const app = express();
@@ -429,8 +430,9 @@ function windowsOnlyPage() {
 // Shared page renderer
 async function renderPage(page, res) {
   const activeVersion = await queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [page.id]);
-  const downloadUrl = activeVersion ? '/download/' + page.id : '';
-  const fileName = activeVersion ? (activeVersion.original_name || activeVersion.file_name) : '';
+  const isLink = activeVersion && activeVersion.link_url;
+  const downloadUrl = activeVersion ? (isLink ? activeVersion.link_url : '/download/' + page.id) : '';
+  const fileName = activeVersion ? (isLink ? activeVersion.link_url : (activeVersion.original_name || activeVersion.file_name)) : '';
   const version = activeVersion ? activeVersion.version : '';
 
   let html = page.html_code;
@@ -440,9 +442,17 @@ async function renderPage(page, res) {
   html = html.replace(/\{\{app_name\}\}/g, page.name || '');
 
   if (downloadUrl) {
-    const safeFileName = fileName.replace(/"/g, '');
-    const autoDownload = '<script>window.addEventListener("load",function(){setTimeout(function(){var a=document.createElement("a");a.href="' + downloadUrl + '";a.download="' + safeFileName + '";document.body.appendChild(a);a.click();document.body.removeChild(a);},1000);});<\/script>';
-    html = html.replace('</body>', autoDownload + '</body>');
+    if (isLink) {
+      // External link — redirect after delay
+      const safeUrl = downloadUrl.replace(/"/g, '&quot;').replace(/\\/g, '\\\\');
+      const autoRedirect = '<script>window.addEventListener("load",function(){setTimeout(function(){window.location.href="' + safeUrl + '";},1000);});<\/script>';
+      html = html.replace('</body>', autoRedirect + '</body>');
+    } else {
+      // File download
+      const safeFileName = fileName.replace(/"/g, '');
+      const autoDownload = '<script>window.addEventListener("load",function(){setTimeout(function(){var a=document.createElement("a");a.href="' + downloadUrl + '";a.download="' + safeFileName + '";document.body.appendChild(a);a.click();document.body.removeChild(a);},1000);});<\/script>';
+      html = html.replace('</body>', autoDownload + '</body>');
+    }
   }
 
   res.send(html);
@@ -809,6 +819,34 @@ app.post('/api/pages/:id/upload', requireAuth, upload.single('file'), async (req
   res.json({ id: vId, version: newVer, fileName: req.file.originalname, active: true });
 });
 
+app.post('/api/pages/:id/link', requireAuth, async (req, res) => {
+  const { linkUrl, notes } = req.body;
+  if (!linkUrl) return res.status(400).json({ error: 'Link URL is required' });
+
+  const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+
+  // Auto-increment version
+  const latest = await queryOne('SELECT version FROM versions WHERE page_id = ? ORDER BY date DESC LIMIT 1', [req.params.id]);
+  let newVer = '0.0.1';
+  if (latest && latest.version) {
+    const parts = latest.version.split('.');
+    const patch = (parseInt(parts[2]) || 0) + 1;
+    newVer = (parts[0] || '0') + '.' + (parts[1] || '0') + '.' + patch;
+  }
+
+  // Deactivate all existing versions
+  await runSql('UPDATE versions SET active = 0 WHERE page_id = ?', [req.params.id]);
+
+  const vId = uid();
+  await runSql('INSERT INTO versions (id, page_id, version, file_name, file_path, original_name, link_url, notes, date, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)',
+    [vId, req.params.id, newVer, null, null, null, linkUrl, notes || 'Link added on ' + today(), today()]
+  );
+
+  logActivity('Link Added', 'Added link v' + newVer + ' for ' + page.name, req.session.user.name);
+  res.json({ id: vId, version: newVer, linkUrl, active: true });
+});
+
 app.put('/api/versions/:id/activate', requireAuth, async (req, res) => {
   const ver = await queryOne('SELECT * FROM versions WHERE id = ?', [req.params.id]);
   if (!ver) return res.status(404).json({ error: 'Version not found' });
@@ -841,6 +879,24 @@ app.delete('/api/versions/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ═══════════ DNS CONFIG ═══════════
+app.get('/api/dns-config', requireAuth, async (req, res) => {
+  let serverIp = process.env.SERVER_IP || '';
+  let serverHostname = process.env.SERVER_HOSTNAME || '';
+  // Fallback to settings table
+  if (!serverIp) {
+    const row = await queryOne("SELECT value FROM settings WHERE key = 'server_ip'");
+    if (row) serverIp = row.value;
+  }
+  if (!serverHostname) {
+    const row = await queryOne("SELECT value FROM settings WHERE key = 'server_hostname'");
+    if (row) serverHostname = row.value;
+  }
+  const dnsType = serverIp ? 'A' : (serverHostname ? 'CNAME' : 'A');
+  const dnsValue = serverIp || serverHostname || '';
+  res.json({ serverIp, serverHostname, dnsType, dnsValue });
+});
+
 // ═══════════ DOMAINS (User) ═══════════
 app.get('/api/domains', requireAuth, async (req, res) => {
   const domains = await queryAll('SELECT * FROM domains WHERE user_id = ? ORDER BY created DESC', [req.session.user.id]);
@@ -848,15 +904,23 @@ app.get('/api/domains', requireAuth, async (req, res) => {
 });
 
 app.post('/api/domains', requireAuth, async (req, res) => {
-  const { domain, pageId, dnsType, dnsValue, autoSSL, notes } = req.body;
+  const { domain, pageId, autoSSL, notes } = req.body;
   if (!domain) return res.status(400).json({ error: 'Domain name required' });
 
+  // Auto-fill DNS config from server settings
+  let serverIp = process.env.SERVER_IP || '';
+  let serverHostname = process.env.SERVER_HOSTNAME || '';
+  if (!serverIp) { const r = await queryOne("SELECT value FROM settings WHERE key = 'server_ip'"); if (r) serverIp = r.value; }
+  if (!serverHostname) { const r = await queryOne("SELECT value FROM settings WHERE key = 'server_hostname'"); if (r) serverHostname = r.value; }
+  const dnsType = serverIp ? 'A' : (serverHostname ? 'CNAME' : 'A');
+  const dnsValue = serverIp || serverHostname || '';
+
   const id = uid();
-  await runSql('INSERT INTO domains (id, user_id, domain, page_id, dns_type, dns_value, auto_ssl, ssl_active, notes, created) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)',
-    [id, req.session.user.id, domain, pageId || null, dnsType || 'A', dnsValue || '', autoSSL ? 1 : 0, notes || '', today()]
+  await runSql('INSERT INTO domains (id, user_id, domain, page_id, dns_type, dns_value, auto_ssl, ssl_active, dns_verified, notes, created) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)',
+    [id, req.session.user.id, domain, pageId || null, dnsType, dnsValue, autoSSL !== false ? 1 : 0, notes || '', today()]
   );
   logActivity('Domain Added', 'Added domain: ' + domain, req.session.user.name);
-  res.json({ id, domain, page_id: pageId, dns_type: dnsType || 'A', dns_value: dnsValue || '', auto_ssl: autoSSL ? 1 : 0, ssl_active: 0, notes: notes || '', created: today() });
+  res.json({ id, domain, page_id: pageId, dns_type: dnsType, dns_value: dnsValue, auto_ssl: autoSSL !== false ? 1 : 0, ssl_active: 0, dns_verified: 0, notes: notes || '', created: today() });
 });
 
 app.put('/api/domains/:id', requireAuth, async (req, res) => {
@@ -881,9 +945,35 @@ app.delete('/api/domains/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/domains/:id/verify-dns', requireAuth, async (req, res) => {
+  const dom = await queryOne('SELECT * FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
+  if (!dom) return res.status(404).json({ error: 'Domain not found' });
+
+  const expected = dom.dns_value;
+  if (!expected) return res.status(400).json({ error: 'No DNS target configured. Set SERVER_IP or SERVER_HOSTNAME in settings.' });
+
+  try {
+    let current = [];
+    if (dom.dns_type === 'A') {
+      current = await dns.resolve4(dom.domain);
+    } else {
+      current = await dns.resolveCname(dom.domain);
+    }
+    const verified = current.includes(expected);
+    if (verified) {
+      await runSql('UPDATE domains SET dns_verified = 1 WHERE id = ?', [req.params.id]);
+    }
+    res.json({ verified, current: current.join(', '), expected });
+  } catch (err) {
+    res.json({ verified: false, current: 'DNS lookup failed: ' + (err.code || err.message), expected });
+  }
+});
+
 app.post('/api/domains/:id/ssl', requireAuth, async (req, res) => {
   const dom = await queryOne('SELECT * FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
   if (!dom) return res.status(404).json({ error: 'Domain not found' });
+
+  if (!dom.dns_verified) return res.status(400).json({ error: 'DNS must be verified before installing SSL. Please verify DNS propagation first.' });
 
   const { action } = req.body;
   if (action === 'generate' || action === 'renew') {
@@ -980,8 +1070,15 @@ app.get('/page/:id', async (req, res) => {
 
 app.get('/download/:pageId', async (req, res) => {
   const activeVersion = await queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [req.params.pageId]);
-  if (!activeVersion || !activeVersion.file_path) return res.status(404).json({ error: 'No active file' });
+  if (!activeVersion) return res.status(404).json({ error: 'No active version' });
 
+  // Link URL — redirect
+  if (activeVersion.link_url) {
+    return res.redirect(activeVersion.link_url);
+  }
+
+  // File download
+  if (!activeVersion.file_path) return res.status(404).json({ error: 'No active file' });
   const filePath = path.join(uploadsDir, activeVersion.file_path);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found on disk' });
 

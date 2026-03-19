@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Dashboard - SC Landing Pages</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+
+        /* Login Screen */
+        .login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .login-box { background: #161922; border: 1px solid #1e2230; border-radius: 12px; padding: 40px; width: 400px; max-width: 90vw; }
+        .login-box h1 { font-size: 1.3rem; margin-bottom: 6px; color: #fff; }
+        .login-box .sub { font-size: 0.82rem; color: #64748b; margin-bottom: 24px; }
+        .login-box select, .login-box input { width: 100%; padding: 10px 14px; background: #0f1117; border: 1px solid #1e2230; border-radius: 8px; color: #e2e8f0; font-size: 0.9rem; margin-bottom: 14px; }
+        .login-box select:focus, .login-box input:focus { outline: none; border-color: #818cf8; }
+        .login-box .login-btn { width: 100%; padding: 11px; background: #818cf8; color: #fff; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+        .login-box .login-btn:hover { background: #6366f1; }
+        .login-box .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .no-users-msg { text-align: center; color: #64748b; font-size: 0.85rem; padding: 20px 0; }
+
+        /* Dashboard Layout */
+        .dashboard { display: none; }
+        .dashboard.active { display: flex; }
+        .sidebar { width: 250px; background: #161922; border-right: 1px solid #1e2230; padding: 20px 0; display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 10; }
+        .sidebar-brand { padding: 0 20px 20px; border-bottom: 1px solid #1e2230; margin-bottom: 8px; }
+        .sidebar-brand h2 { font-size: 1.05rem; font-weight: 700; color: #fff; }
+        .sidebar-brand span { font-size: 0.72rem; color: #64748b; }
+        .nav-section { padding: 10px 16px 4px; font-size: 0.65rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 1.5px; }
+        .nav-items { list-style: none; }
+        .nav-items li a { display: flex; align-items: center; gap: 10px; padding: 9px 20px; color: #94a3b8; text-decoration: none; font-size: 0.85rem; transition: all 0.15s; border-left: 3px solid transparent; }
+        .nav-items li a:hover { color: #fff; background: rgba(255,255,255,0.03); }
+        .nav-items li a.active { color: #818cf8; background: rgba(129,140,248,0.06); border-left-color: #818cf8; }
+        .nav-items li a svg { width: 18px; height: 18px; fill: currentColor; }
+        .nav-items li a .nav-badge { margin-left: auto; background: rgba(129,140,248,0.15); color: #818cf8; font-size: 0.68rem; font-weight: 600; padding: 1px 7px; border-radius: 10px; }
+        .sidebar-footer { margin-top: auto; padding: 16px 20px; border-top: 1px solid #1e2230; }
+        .user-info { display: flex; align-items: center; gap: 10px; }
+        .avatar { width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg,#818cf8,#6366f1); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem; color: #fff; flex-shrink: 0; }
+        .user-details .uname { font-size: 0.82rem; font-weight: 600; color: #f1f5f9; }
+        .user-details .urole { font-size: 0.68rem; color: #64748b; }
+        .logout-btn { display: block; margin-top: 10px; padding: 6px 12px; background: transparent; border: 1px solid #1e2230; border-radius: 6px; color: #94a3b8; font-size: 0.75rem; cursor: pointer; text-align: center; transition: all 0.15s; }
+        .logout-btn:hover { border-color: #ef4444; color: #ef4444; }
+
+        /* Main content */
+        .main { margin-left: 250px; padding: 28px 32px; flex: 1; }
+        .page { display: none; }
+        .page.active { display: block; }
+        .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+        .page-header h1 { font-size: 1.35rem; font-weight: 700; color: #fff; }
+        .page-header p { font-size: 0.82rem; color: #64748b; margin-top: 2px; }
+        .ph-left { display: flex; flex-direction: column; }
+
+        /* Stats */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: #161922; border: 1px solid #1e2230; border-radius: 10px; padding: 18px 20px; display: flex; align-items: center; gap: 14px; }
+        .stat-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+        .stat-icon svg { width: 22px; height: 22px; fill: #fff; }
+        .stat-purple .stat-icon { background: rgba(129,140,248,0.15); }
+        .stat-purple .stat-icon svg { fill: #818cf8; }
+        .stat-green .stat-icon { background: rgba(52,211,153,0.15); }
+        .stat-green .stat-icon svg { fill: #34d399; }
+        .stat-blue .stat-icon { background: rgba(96,165,250,0.15); }
+        .stat-blue .stat-icon svg { fill: #60a5fa; }
+        .stat-orange .stat-icon { background: rgba(251,146,60,0.15); }
+        .stat-orange .stat-icon svg { fill: #fb923c; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
+        .stat-label { font-size: 0.75rem; color: #64748b; }
+
+        /* Cards & sections */
+        .section-card { background: #161922; border: 1px solid #1e2230; border-radius: 10px; padding: 22px; margin-bottom: 20px; }
+        .section-card h3 { font-size: 1rem; font-weight: 600; color: #f1f5f9; margin-bottom: 4px; }
+        .section-card .desc { font-size: 0.78rem; color: #64748b; margin-bottom: 16px; }
+
+        /* Form */
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; font-size: 0.78rem; font-weight: 600; color: #94a3b8; margin-bottom: 5px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 9px 12px; background: #0f1117; border: 1px solid #1e2230; border-radius: 8px; color: #e2e8f0; font-size: 0.85rem; font-family: inherit; }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: #818cf8; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+        /* Buttons */
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: none; border-radius: 8px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+        .btn svg { width: 16px; height: 16px; fill: currentColor; }
+        .btn-primary { background: #818cf8; color: #fff; }
+        .btn-primary:hover { background: #6366f1; }
+        .btn-outline { background: transparent; border: 1px solid #1e2230; color: #94a3b8; }
+        .btn-outline:hover { border-color: #818cf8; color: #818cf8; }
+        .btn-danger { background: rgba(239,68,68,0.12); color: #ef4444; }
+        .btn-danger:hover { background: rgba(239,68,68,0.22); }
+        .btn-success { background: rgba(52,211,153,0.12); color: #34d399; }
+        .btn-success:hover { background: rgba(52,211,153,0.22); }
+        .btn-sm { padding: 5px 10px; font-size: 0.75rem; }
+        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        /* Table */
+        .data-table { width: 100%; border-collapse: collapse; }
+        .data-table th { text-align: left; padding: 10px 16px; font-size: 0.7rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #1e2230; background: #0f1117; }
+        .data-table td { padding: 12px 16px; border-bottom: 1px solid rgba(30,34,48,0.5); font-size: 0.85rem; vertical-align: middle; }
+        .data-table tr:hover { background: rgba(255,255,255,0.01); }
+
+        /* Badges */
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; }
+        .badge-green { background: rgba(52,211,153,0.12); color: #34d399; }
+        .badge-yellow { background: rgba(250,204,21,0.12); color: #facc15; }
+        .badge-red { background: rgba(239,68,68,0.12); color: #ef4444; }
+        .badge-gray { background: rgba(148,163,184,0.1); color: #94a3b8; }
+        .badge-blue { background: rgba(96,165,250,0.12); color: #60a5fa; }
+
+        /* Modal */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; display: none; align-items: center; justify-content: center; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: #161922; border: 1px solid #1e2230; border-radius: 12px; width: 520px; max-width: 92vw; max-height: 85vh; overflow-y: auto; }
+        .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid #1e2230; }
+        .modal-header h2 { font-size: 1.05rem; font-weight: 700; color: #fff; }
+        .modal-close { background: none; border: none; color: #64748b; font-size: 1.4rem; cursor: pointer; line-height: 1; }
+        .modal-close:hover { color: #fff; }
+        .modal-body { padding: 22px; }
+        .modal-footer { padding: 14px 22px; border-top: 1px solid #1e2230; display: flex; justify-content: flex-end; gap: 8px; }
+
+        /* Toast */
+        .toast { position: fixed; bottom: 24px; right: 24px; background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px 20px; display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: #e2e8f0; transform: translateY(80px); opacity: 0; transition: all 0.3s; z-index: 200; }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast .dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; flex-shrink: 0; }
+
+        /* Empty state */
+        .empty-state { text-align: center; padding: 40px 20px; }
+        .empty-state svg { width: 48px; height: 48px; fill: #334155; margin-bottom: 12px; }
+        .empty-state p { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════ LOGIN SCREEN ═══════ -->
+<div class="login-screen" id="login-screen">
+    <div class="login-box">
+        <h1>User Dashboard</h1>
+        <p class="sub">Sign in to manage your files and domains.</p>
+        <label style="font-size:0.78rem;font-weight:600;color:#94a3b8;margin-bottom:5px;display:block;">Select Your Account</label>
+        <select id="login-user-select"></select>
+        <button class="login-btn" id="login-btn" onclick="doLogin()">Sign In</button>
+    </div>
+</div>
+
+<!-- ═══════ DASHBOARD ═══════ -->
+<div class="dashboard" id="dashboard">
+
+<aside class="sidebar">
+    <div class="sidebar-brand"><h2>SC Landing Pages</h2><span>User Dashboard</span></div>
+    <div class="nav-section">Overview</div>
+    <ul class="nav-items">
+        <li><a href="#" data-page="home" class="active"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>Home</a></li>
+    </ul>
+    <div class="nav-section">Manage</div>
+    <ul class="nav-items">
+        <li><a href="#" data-page="files"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>My Files <span class="nav-badge" id="nav-files-count">0</span></a></li>
+        <li><a href="#" data-page="domains"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>My Domains <span class="nav-badge" id="nav-domains-count">0</span></a></li>
+    </ul>
+    <div class="sidebar-footer">
+        <div class="user-info">
+            <div class="avatar" id="sidebar-avatar">U</div>
+            <div class="user-details">
+                <div class="uname" id="sidebar-uname">User</div>
+                <div class="urole" id="sidebar-urole">User</div>
+            </div>
+        </div>
+        <button class="logout-btn" onclick="doLogout()">Sign Out</button>
+    </div>
+</aside>
+
+<main class="main">
+
+<!-- ═══════════ HOME ═══════════ -->
+<div class="page active" id="page-home">
+    <div class="page-header"><div class="ph-left"><h1 id="welcome-title">Welcome</h1><p>Your dashboard overview.</p></div></div>
+    <div class="stats-grid">
+        <div class="stat-card stat-purple"><div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg></div><div class="stat-value" id="stat-pages">0</div><div class="stat-label">My Pages</div></div>
+        <div class="stat-card stat-green"><div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2z"/></svg></div><div class="stat-value" id="stat-versions">0</div><div class="stat-label">File Versions</div></div>
+        <div class="stat-card stat-blue"><div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg></div><div class="stat-value" id="stat-domains">0</div><div class="stat-label">My Domains</div></div>
+        <div class="stat-card stat-orange"><div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2z"/></svg></div><div class="stat-value" id="stat-ssl">0</div><div class="stat-label">SSL Active</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div class="section-card">
+            <h3>My Landing Pages</h3><p class="desc">Pages assigned to you by the admin.</p>
+            <div id="home-pages-list"></div>
+        </div>
+        <div class="section-card">
+            <h3>Quick Actions</h3><p class="desc">Common tasks.</p>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                <button class="btn btn-primary" onclick="navigateTo('files')"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2z"/></svg>Manage My Files</button>
+                <button class="btn btn-outline" onclick="navigateTo('domains');openDomainModal()"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>Add Domain</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════ MY FILES ═══════════ -->
+<div class="page" id="page-files">
+    <div class="page-header"><div class="ph-left"><h1>My Files</h1><p>Upload and manage download files for your landing pages.</p></div></div>
+    <div class="section-card" style="padding:14px 20px;margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <label style="font-size:0.8rem;color:#94a3b8;">Select page:</label>
+            <select id="files-page-select" onchange="renderFileManager()" style="padding:7px 12px;background:#0f1117;border:1px solid #1e2230;border-radius:6px;color:#e2e8f0;font-size:0.85rem;"></select>
+            <span class="badge badge-green" id="fm-active-badge">-</span>
+        </div>
+    </div>
+    <div class="section-card">
+        <h3>Add Version</h3><p class="desc">Upload a file or add an external link. It will automatically become the active version.</p>
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+            <button class="btn btn-sm" id="tab-file" onclick="switchVersionTab('file')" style="background:#818cf8;color:#fff;">Upload File</button>
+            <button class="btn btn-outline btn-sm" id="tab-link" onclick="switchVersionTab('link')">External Link</button>
+        </div>
+        <div id="version-tab-file">
+            <div class="form-group">
+                <label>Choose File</label>
+                <div style="position:relative;">
+                    <input type="file" id="fm-file-input" onchange="handleFileUpload(this)" style="width:100%;padding:12px;background:#0f1117;border:1px solid #1e2230;border-radius:8px;color:#e2e8f0;font-size:0.85rem;cursor:pointer;">
+                </div>
+            </div>
+        </div>
+        <div id="version-tab-link" style="display:none;">
+            <div class="form-group">
+                <label>External URL</label>
+                <input type="url" id="fm-link-url" placeholder="https://example.com/download/app.exe" style="width:100%;padding:10px 12px;background:#0f1117;border:1px solid #1e2230;border-radius:8px;color:#e2e8f0;font-size:0.85rem;">
+            </div>
+            <div class="form-group">
+                <label>Notes (optional)</label>
+                <input type="text" id="fm-link-notes" placeholder="e.g. Google Drive download link" style="width:100%;padding:10px 12px;background:#0f1117;border:1px solid #1e2230;border-radius:8px;color:#e2e8f0;font-size:0.85rem;">
+            </div>
+            <button class="btn btn-primary" onclick="handleLinkAdd()">Add Link</button>
+        </div>
+        <div id="fm-upload-status" style="display:none;padding:12px;background:#0f1117;border-radius:8px;margin-top:8px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span class="dot" style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;"></span>
+                <span id="fm-upload-msg" style="font-size:0.85rem;color:#e2e8f0;"></span>
+            </div>
+        </div>
+    </div>
+    <div class="section-card"><h3>Version History</h3><p class="desc">All registered versions for this page.</p><div id="fm-versions"></div></div>
+</div>
+
+<!-- ═══════════ MY DOMAINS ═══════════ -->
+<div class="page" id="page-domains">
+    <div class="page-header"><div class="ph-left"><h1>My Domains</h1><p>Add and manage custom domains for your landing pages.</p></div><button class="btn btn-primary" onclick="openDomainModal()"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>Add Domain</button></div>
+
+    <div class="stats-grid" style="margin-bottom:20px;">
+        <div class="stat-card stat-blue"><div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg></div><div class="stat-value" id="stat-domains2">0</div><div class="stat-label">Total Domains</div></div>
+        <div class="stat-card stat-green"><div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2z"/></svg></div><div class="stat-value" id="stat-ssl2">0</div><div class="stat-label">SSL Active</div></div>
+        <div class="stat-card stat-orange"><div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg></div><div class="stat-value" id="stat-nossl">0</div><div class="stat-label">No SSL</div></div>
+    </div>
+
+    <div class="section-card" style="padding:0;overflow:hidden;">
+        <div id="domains-table-wrap"></div>
+    </div>
+
+    <div class="section-card" style="margin-top:20px;">
+        <h3>DNS Setup Guide</h3><p class="desc">Add these records at your DNS registrar to connect your domains to this server.</p>
+        <div id="dns-guide-content" style="padding:14px;background:#0f1117;border-radius:8px;font-size:0.82rem;color:#94a3b8;line-height:1.8;">
+            Loading server configuration...
+        </div>
+    </div>
+</div>
+
+</main>
+</div>
+
+<!-- ═══════ DOMAIN MODAL ═══════ -->
+<div class="modal-overlay" id="modal-domain">
+    <div class="modal">
+        <div class="modal-header"><h2 id="domain-modal-title">Add Domain</h2><button class="modal-close" onclick="closeModal('modal-domain')">&times;</button></div>
+        <div class="modal-body">
+            <div id="dm-form-fields">
+                <div class="form-group"><label>Domain Name</label><input type="text" id="dm-domain" placeholder="e.g. download.myapp.com"></div>
+                <div class="form-group"><label>Assign to Landing Page</label><select id="dm-page"></select></div>
+                <div class="form-group"><label>Auto SSL</label><select id="dm-ssl"><option value="yes">Yes - Auto-install Let's Encrypt</option><option value="no">No - I'll handle SSL myself</option></select></div>
+                <div class="form-group"><label>Notes (optional)</label><input type="text" id="dm-notes" placeholder="e.g. Main download domain"></div>
+                <input type="hidden" id="dm-edit-id" value="">
+            </div>
+            <div id="dm-dns-info" style="display:none;">
+                <div style="padding:16px;background:#0f1117;border-radius:10px;border:1px solid #1e2230;">
+                    <h4 style="color:#fff;font-size:0.9rem;margin-bottom:12px;">Configure DNS Records</h4>
+                    <p style="color:#94a3b8;font-size:0.8rem;margin-bottom:14px;">Add the following record at your domain registrar's DNS management portal:</p>
+                    <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;padding:14px;background:#161922;border-radius:8px;border:1px solid #1e2230;">
+                        <span style="color:#64748b;font-size:0.78rem;font-weight:600;">Type</span>
+                        <span style="color:#818cf8;font-weight:600;font-size:0.85rem;" id="dns-info-type">A</span>
+                        <span style="color:#64748b;font-size:0.78rem;font-weight:600;">Name</span>
+                        <span style="color:#e2e8f0;font-size:0.85rem;" id="dns-info-name">@</span>
+                        <span style="color:#64748b;font-size:0.78rem;font-weight:600;">Value</span>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <code style="color:#34d399;font-size:0.85rem;background:#0f1117;padding:2px 8px;border-radius:4px;" id="dns-info-value">-</code>
+                            <button class="btn btn-outline btn-sm" onclick="copyDnsValue()" style="padding:3px 8px;font-size:0.7rem;">Copy</button>
+                        </div>
+                        <span style="color:#64748b;font-size:0.78rem;font-weight:600;">TTL</span>
+                        <span style="color:#e2e8f0;font-size:0.85rem;">300 (or Auto)</span>
+                    </div>
+                    <p style="color:#64748b;font-size:0.75rem;margin-top:12px;">DNS changes can take up to 24-48 hours to propagate. Use the "Verify DNS" button in the domains table to check.</p>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer" id="dm-footer-form"><button class="btn btn-outline" onclick="closeModal('modal-domain')">Cancel</button><button class="btn btn-primary" onclick="saveDomain()">Save Domain</button></div>
+        <div class="modal-footer" id="dm-footer-dns" style="display:none;"><button class="btn btn-primary" onclick="closeModal('modal-domain')">Done</button></div>
+    </div>
+</div>
+
+<div class="toast" id="toast"><span class="dot"></span><span id="toast-msg"></span></div>
+
+<script>
+// ══════════ HELPERS ══════════
+function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 5); }
+function today() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function showToast(m) { var t = document.getElementById('toast'); document.getElementById('toast-msg').textContent = m; t.classList.add('show'); setTimeout(function(){t.classList.remove('show');}, 2500); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+
+// ══════════ DATA ══════════
+function getData(key, fallback) { try { var s = localStorage.getItem(key); if(s) return JSON.parse(s); } catch(e){} return fallback; }
+function setData(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+
+function getPages() { return getData('sc_pages', []); }
+function savePages(p) { setData('sc_pages', p); }
+function getUsers() { return getData('sc_users', []); }
+function getDomains() { return getData('sc_domains', []); }
+function saveDomains(d) { setData('sc_domains', d); }
+
+
+// ══════════ CURRENT USER ══════════
+var currentUser = null;
+
+function getMyPages() {
+    // Users see all pages (admin assigns pages, users manage files for them)
+    return getPages();
+}
+
+function getMyDomains() {
+    if(!currentUser) return [];
+    return getDomains().filter(function(d){ return d.userId === currentUser.id; });
+}
+
+// ══════════ LOGIN ══════════
+function populateLoginSelect() {
+    var users = getUsers();
+    var sel = document.getElementById('login-user-select');
+    var btn = document.getElementById('login-btn');
+    if(users.length === 0) {
+        sel.innerHTML = '<option value="">No users available</option>';
+        btn.disabled = true;
+        return;
+    }
+    var activeUsers = users.filter(function(u){ return u.status === 'Active'; });
+    if(activeUsers.length === 0) {
+        sel.innerHTML = '<option value="">No active users</option>';
+        btn.disabled = true;
+        return;
+    }
+    sel.innerHTML = activeUsers.map(function(u){ return '<option value="'+u.id+'">'+esc(u.name)+' ('+esc(u.email)+')</option>'; }).join('');
+    btn.disabled = false;
+}
+
+function doLogin() {
+    var userId = document.getElementById('login-user-select').value;
+    if(!userId) return;
+    var users = getUsers();
+    var user = users.find(function(u){ return u.id === userId; });
+    if(!user) { showToast('User not found'); return; }
+
+    currentUser = user;
+    sessionStorage.setItem('sc_current_user', JSON.stringify(user));
+
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('dashboard').classList.add('active');
+
+    document.getElementById('sidebar-uname').textContent = user.name;
+    document.getElementById('sidebar-urole').textContent = user.role;
+    document.getElementById('sidebar-avatar').textContent = user.name.charAt(0).toUpperCase();
+    document.getElementById('welcome-title').textContent = 'Welcome, ' + user.name;
+
+    renderHome();
+}
+
+function doLogout() {
+    currentUser = null;
+    sessionStorage.removeItem('sc_current_user');
+    document.getElementById('dashboard').classList.remove('active');
+    document.getElementById('login-screen').style.display = 'flex';
+    populateLoginSelect();
+}
+
+// Auto-login from session
+function tryAutoLogin() {
+    try {
+        var saved = sessionStorage.getItem('sc_current_user');
+        if(saved) {
+            var user = JSON.parse(saved);
+            var users = getUsers();
+            var found = users.find(function(u){ return u.id === user.id && u.status === 'Active'; });
+            if(found) {
+                currentUser = found;
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('dashboard').classList.add('active');
+                document.getElementById('sidebar-uname').textContent = found.name;
+                document.getElementById('sidebar-urole').textContent = found.role;
+                document.getElementById('sidebar-avatar').textContent = found.name.charAt(0).toUpperCase();
+                document.getElementById('welcome-title').textContent = 'Welcome, ' + found.name;
+                renderHome();
+                return;
+            }
+        }
+    } catch(e){}
+    populateLoginSelect();
+}
+
+// ══════════ NAVIGATION ══════════
+function navigateTo(pageId) {
+    document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active');});
+    document.getElementById('page-'+pageId).classList.add('active');
+    document.querySelectorAll('[data-page]').forEach(function(l){l.classList.remove('active');});
+    var link = document.querySelector('[data-page="'+pageId+'"]');
+    if(link) link.classList.add('active');
+    if(pageId==='home') renderHome();
+    if(pageId==='files') { populateFilePageSelect(); renderFileManager(); }
+    if(pageId==='domains') renderDomains();
+}
+document.querySelectorAll('[data-page]').forEach(function(link){
+    link.addEventListener('click', function(e){ e.preventDefault(); navigateTo(this.getAttribute('data-page')); });
+});
+
+// ══════════ HOME ══════════
+function renderHome() {
+    var pages = getMyPages();
+    var domains = getMyDomains();
+    var totalVersions = 0;
+    pages.forEach(function(p){ totalVersions += (p.versions||[]).length; });
+
+    document.getElementById('stat-pages').textContent = pages.length;
+    document.getElementById('stat-versions').textContent = totalVersions;
+    document.getElementById('stat-domains').textContent = domains.length;
+    document.getElementById('stat-ssl').textContent = domains.filter(function(d){return d.sslActive;}).length;
+    document.getElementById('nav-files-count').textContent = pages.length;
+    document.getElementById('nav-domains-count').textContent = domains.length;
+
+    var list = document.getElementById('home-pages-list');
+    if(pages.length === 0) {
+        list.innerHTML = '<p style="color:#475569;font-size:0.85rem;">No landing pages assigned yet. Ask your admin to create pages.</p>';
+        return;
+    }
+    var html = '';
+    pages.forEach(function(p){
+        var activeV = (p.versions||[]).find(function(v){return v.active;});
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1e2230;">';
+        html += '<div><div style="font-weight:600;color:#f1f5f9;">'+esc(p.name)+'</div><div style="font-size:0.75rem;color:#64748b;">'+esc(p.created||'')+'</div></div>';
+        html += '<span class="badge '+(p.status==='active'?'badge-green':'badge-yellow')+'">'+esc(p.status)+'</span>';
+        html += '</div>';
+    });
+    list.innerHTML = html;
+}
+
+// ══════════ FILE MANAGER ══════════
+function populateFilePageSelect() {
+    var pages = getMyPages();
+    var sel = document.getElementById('files-page-select');
+    var prev = sel.value;
+    sel.innerHTML = pages.map(function(p){ return '<option value="'+p.id+'">'+esc(p.name)+' ('+esc(p.status)+')</option>'; }).join('');
+    if(prev && pages.find(function(p){return p.id===prev;})) sel.value = prev;
+}
+
+function renderFileManager() {
+    var pages = getMyPages();
+    var sel = document.getElementById('files-page-select').value;
+    var page = pages.find(function(p){return p.id===sel;});
+    var badge = document.getElementById('fm-active-badge');
+    if(!page) { badge.textContent='-'; document.getElementById('fm-versions').innerHTML='<div class="empty-state"><p>No pages available.</p></div>'; return; }
+
+    var activeV = (page.versions||[]).find(function(v){return v.active;});
+    badge.textContent = activeV ? 'Active: v'+activeV.version : 'No active version';
+
+    var versions = page.versions || [];
+    if(versions.length===0) {
+        document.getElementById('fm-versions').innerHTML='<div class="empty-state"><p>No versions yet. Add one above.</p></div>';
+        return;
+    }
+    var html = '<table class="data-table"><thead><tr><th>Source</th><th>Type</th><th>Version</th><th>Date</th><th>Notes</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+    versions.forEach(function(v,i){
+        var isLink = !!v.linkUrl;
+        var sourceDisplay = isLink
+            ? '<span style="color:#60a5fa;word-break:break-all;">'+esc(v.linkUrl)+'</span>'
+            : '<span style="font-weight:500;color:#f1f5f9;">'+esc(v.fileName)+'</span>';
+        var typeBadge = isLink
+            ? '<span class="badge badge-blue">Link</span>'
+            : '<span class="badge badge-gray">File</span>';
+        html += '<tr><td style="max-width:220px;">'+sourceDisplay+'</td>';
+        html += '<td>'+typeBadge+'</td>';
+        html += '<td>v'+esc(v.version)+'</td><td style="color:#64748b;">'+esc(v.date)+'</td>';
+        html += '<td style="max-width:180px;font-size:0.8rem;color:#94a3b8;">'+esc(v.notes)+'</td>';
+        html += '<td><span class="badge '+(v.active?'badge-green':'badge-gray')+'">'+(v.active?'Active':'Inactive')+'</span></td>';
+        html += '<td><div class="btn-row">';
+        if(!v.active) html += '<button class="btn btn-outline btn-sm" onclick="activateVersion(\''+sel+'\','+i+')">Activate</button>';
+        html += '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\''+sel+'\','+i+')">Delete</button></div></td></tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('fm-versions').innerHTML = html;
+}
+
+function handleFileUpload(input) {
+    if(!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    var sel = document.getElementById('files-page-select').value;
+    if(!sel) { showToast('No page selected'); return; }
+
+    var statusDiv = document.getElementById('fm-upload-status');
+    var statusMsg = document.getElementById('fm-upload-msg');
+    statusDiv.style.display = 'block';
+    statusMsg.textContent = 'Processing "' + file.name + '"...';
+
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        var dataUrl = e.target.result;
+        var pages = getPages();
+        var idx = pages.findIndex(function(p){return p.id===sel;});
+        if(idx<0) { showToast('Page not found'); return; }
+        if(!pages[idx].versions) pages[idx].versions = [];
+
+        // Auto-increment version
+        var lastVer = '0.0.0';
+        if(pages[idx].versions.length > 0) lastVer = pages[idx].versions[0].version || '0.0.0';
+        var parts = lastVer.split('.');
+        var major = parseInt(parts[0])||0, minor = parseInt(parts[1])||0, patch = parseInt(parts[2])||0;
+        patch++;
+        var newVer = major + '.' + minor + '.' + patch;
+
+        // Deactivate all, set new as active
+        pages[idx].versions.forEach(function(v){v.active=false;});
+        pages[idx].versions.unshift({
+            version: newVer,
+            fileName: file.name,
+            fileUrl: dataUrl,
+            notes: 'Uploaded on ' + today(),
+            date: today(),
+            active: true
+        });
+        pages[idx].version = newVer;
+        pages[idx].fileName = file.name;
+        pages[idx].fileUrl = dataUrl;
+        savePages(pages);
+
+        input.value = '';
+        renderFileManager();
+        statusMsg.textContent = '"' + file.name + '" uploaded as v' + newVer + ' and activated!';
+        showToast('File uploaded & activated as v' + newVer);
+    };
+    reader.onerror = function() {
+        statusMsg.textContent = 'Error reading file. Please try again.';
+        showToast('Error reading file');
+    };
+    reader.readAsDataURL(file);
+}
+
+function activateVersion(pageId, vIdx) {
+    var pages = getPages();
+    var idx = pages.findIndex(function(p){return p.id===pageId;});
+    if(idx<0) return;
+    pages[idx].versions.forEach(function(v,i){v.active=(i===vIdx);});
+    var v = pages[idx].versions[vIdx];
+    pages[idx].version = v.version;
+    pages[idx].fileName = v.fileName;
+    pages[idx].fileUrl = v.fileUrl;
+    savePages(pages);
+    renderFileManager();
+    showToast('Switched to v'+v.version);
+}
+
+function deleteVersion(pageId, vIdx) {
+    var pages = getPages();
+    var idx = pages.findIndex(function(p){return p.id===pageId;});
+    if(idx<0) return;
+    if(pages[idx].versions.length<=1) { showToast('Cannot delete the only version'); return; }
+    var was = pages[idx].versions[vIdx].active;
+    pages[idx].versions.splice(vIdx,1);
+    if(was && pages[idx].versions.length>0) {
+        pages[idx].versions[0].active = true;
+        pages[idx].version = pages[idx].versions[0].version;
+        pages[idx].fileName = pages[idx].versions[0].fileName;
+        pages[idx].fileUrl = pages[idx].versions[0].fileUrl;
+    }
+    savePages(pages);
+    renderFileManager();
+    showToast('Version removed');
+}
+
+function switchVersionTab(tab) {
+    document.getElementById('version-tab-file').style.display = tab === 'file' ? 'block' : 'none';
+    document.getElementById('version-tab-link').style.display = tab === 'link' ? 'block' : 'none';
+    document.getElementById('tab-file').className = tab === 'file' ? 'btn btn-sm' : 'btn btn-outline btn-sm';
+    document.getElementById('tab-file').style.background = tab === 'file' ? '#818cf8' : '';
+    document.getElementById('tab-file').style.color = tab === 'file' ? '#fff' : '';
+    document.getElementById('tab-link').className = tab === 'link' ? 'btn btn-sm' : 'btn btn-outline btn-sm';
+    document.getElementById('tab-link').style.background = tab === 'link' ? '#818cf8' : '';
+    document.getElementById('tab-link').style.color = tab === 'link' ? '#fff' : '';
+}
+
+function handleLinkAdd() {
+    var linkUrl = document.getElementById('fm-link-url').value.trim();
+    if(!linkUrl) { showToast('Please enter a URL'); return; }
+    var sel = document.getElementById('files-page-select').value;
+    if(!sel) { showToast('No page selected'); return; }
+
+    var statusDiv = document.getElementById('fm-upload-status');
+    var statusMsg = document.getElementById('fm-upload-msg');
+    statusDiv.style.display = 'block';
+    statusMsg.textContent = 'Adding link...';
+
+    var notes = document.getElementById('fm-link-notes').value.trim();
+    var pages = getPages();
+    var idx = pages.findIndex(function(p){return p.id===sel;});
+    if(idx<0) { showToast('Page not found'); return; }
+    if(!pages[idx].versions) pages[idx].versions = [];
+
+    // Auto-increment version
+    var lastVer = '0.0.0';
+    if(pages[idx].versions.length > 0) lastVer = pages[idx].versions[0].version || '0.0.0';
+    var parts = lastVer.split('.');
+    var major = parseInt(parts[0])||0, minor = parseInt(parts[1])||0, patch = parseInt(parts[2])||0;
+    patch++;
+    var newVer = major + '.' + minor + '.' + patch;
+
+    // Deactivate all, set new as active
+    pages[idx].versions.forEach(function(v){v.active=false;});
+    pages[idx].versions.unshift({
+        version: newVer,
+        fileName: null,
+        fileUrl: null,
+        linkUrl: linkUrl,
+        notes: notes || 'Link added on ' + today(),
+        date: today(),
+        active: true
+    });
+    pages[idx].version = newVer;
+    pages[idx].fileName = null;
+    pages[idx].fileUrl = null;
+    pages[idx].linkUrl = linkUrl;
+    savePages(pages);
+
+    document.getElementById('fm-link-url').value = '';
+    document.getElementById('fm-link-notes').value = '';
+    renderFileManager();
+    statusMsg.textContent = 'Link added as v' + newVer + ' and activated!';
+    showToast('Link added & activated as v' + newVer);
+}
+
+// ══════════ DOMAINS ══════════
+function renderDomains() {
+    var domains = getMyDomains();
+    var pages = getMyPages();
+    document.getElementById('nav-domains-count').textContent = domains.length;
+    document.getElementById('stat-domains2').textContent = domains.length;
+    document.getElementById('stat-ssl2').textContent = domains.filter(function(d){return d.sslActive;}).length;
+    document.getElementById('stat-nossl').textContent = domains.filter(function(d){return !d.sslActive;}).length;
+
+    var wrap = document.getElementById('domains-table-wrap');
+    if(domains.length===0) {
+        wrap.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93z"/></svg><p>No domains added yet.</p><button class="btn btn-primary" onclick="openDomainModal()">Add Your First Domain</button></div>';
+        return;
+    }
+
+    var html = '<table class="data-table"><thead><tr><th>Domain</th><th>Landing Page</th><th>DNS Status</th><th>SSL</th><th>Added</th><th>Actions</th></tr></thead><tbody>';
+    domains.forEach(function(d){
+        var pageName = '-';
+        if(d.pageId) {
+            var p = pages.find(function(x){return x.id===d.pageId;});
+            if(p) pageName = p.name;
+        }
+        // DNS status
+        var dnsBadge = d.dnsVerified ? 'badge-green' : 'badge-yellow';
+        var dnsText = d.dnsVerified ? 'Verified' : 'Pending';
+        // SSL status
+        var sslBadge = d.sslActive ? 'badge-green' : 'badge-yellow';
+        var sslText = d.sslActive ? 'Active' : 'Not Installed';
+        html += '<tr>';
+        html += '<td><div style="font-weight:600;color:#60a5fa;">'+esc(d.domain)+'</div>'+(d.notes?'<div style="font-size:0.72rem;color:#475569;">'+esc(d.notes)+'</div>':'')+'</td>';
+        html += '<td>'+esc(pageName)+'</td>';
+        html += '<td><span class="badge '+dnsBadge+'">'+dnsText+'</span>';
+        html += '<div style="margin-top:4px;"><button class="btn btn-outline btn-sm" onclick="showDnsInfo(\''+d.id+'\')" style="font-size:0.7rem;">View DNS</button> ';
+        if(!d.dnsVerified) html += '<button class="btn btn-outline btn-sm" onclick="verifyDns(\''+d.id+'\')" id="verify-btn-'+d.id+'" style="font-size:0.7rem;">Verify DNS</button>';
+        html += '</div></td>';
+        html += '<td><span class="badge '+sslBadge+'">'+sslText+'</span>'+(d.sslDate?'<div style="font-size:0.68rem;color:#475569;margin-top:2px;">'+esc(d.sslDate)+'</div>':'')+'</td>';
+        html += '<td style="font-size:0.8rem;color:#64748b;">'+esc(d.created)+'</td>';
+        html += '<td><div class="btn-row">';
+        if(d.dnsVerified && !d.sslActive) {
+            html += '<button class="btn btn-success btn-sm" onclick="domainSSL(\''+d.id+'\',\'generate\')">Install SSL</button>';
+        } else if(d.sslActive) {
+            html += '<button class="btn btn-outline btn-sm" onclick="domainSSL(\''+d.id+'\',\'renew\')">Renew SSL</button>';
+        }
+        html += '<button class="btn btn-outline btn-sm" onclick="editDomain(\''+d.id+'\')">Edit</button>';
+        html += '<button class="btn btn-danger btn-sm" onclick="deleteDomain(\''+d.id+'\')">Delete</button>';
+        html += '</div></td>';
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+}
+
+// DNS config from server
+var serverDnsConfig = { serverIp: '', serverHostname: '', dnsType: 'A', dnsValue: '' };
+function loadDnsConfig() {
+    fetch('/api/dns-config', { credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(cfg){
+        serverDnsConfig = cfg;
+        updateDnsGuide();
+    }).catch(function(){});
+}
+function updateDnsGuide() {
+    var el = document.getElementById('dns-guide-content');
+    if(!serverDnsConfig.dnsValue) {
+        el.innerHTML = '<span style="color:#facc15;">Server IP/hostname not configured yet.</span><br>Ask your admin to set <strong>SERVER_IP</strong> or <strong>SERVER_HOSTNAME</strong> in the server settings.';
+        return;
+    }
+    el.innerHTML = '<strong style="color:#f1f5f9;">Required DNS Record</strong><br><br>' +
+        '<div style="display:grid;grid-template-columns:80px 1fr;gap:6px 12px;padding:12px;background:#161922;border-radius:8px;border:1px solid #1e2230;">' +
+        '<span style="color:#64748b;font-weight:600;">Type</span><span style="color:#818cf8;font-weight:600;">'+esc(serverDnsConfig.dnsType)+'</span>' +
+        '<span style="color:#64748b;font-weight:600;">Name</span><span style="color:#e2e8f0;">@ (or your subdomain)</span>' +
+        '<span style="color:#64748b;font-weight:600;">Value</span><span><code style="color:#34d399;background:#0f1117;padding:2px 8px;border-radius:4px;">'+esc(serverDnsConfig.dnsValue)+'</code> <button class="btn btn-outline btn-sm" onclick="copyToClipboard(\''+esc(serverDnsConfig.dnsValue)+'\')" style="padding:2px 6px;font-size:0.68rem;">Copy</button></span>' +
+        '<span style="color:#64748b;font-weight:600;">TTL</span><span style="color:#e2e8f0;">300 (or Auto)</span>' +
+        '</div><br>' +
+        '<strong style="color:#f1f5f9;">Steps</strong><br>' +
+        '1. Add the DNS record above at your domain registrar<br>' +
+        '2. Wait for DNS propagation (can take up to 24-48 hours)<br>' +
+        '3. Click "Verify DNS" next to your domain to confirm<br>' +
+        '4. Once verified, click "Install SSL" to auto-install a certificate';
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(function(){ showToast('Copied to clipboard'); }).catch(function(){ showToast('Copy failed'); });
+}
+function copyDnsValue() {
+    var val = document.getElementById('dns-info-value').textContent;
+    copyToClipboard(val);
+}
+
+function showDomainDnsInfo(domainName) {
+    document.getElementById('dm-form-fields').style.display = 'none';
+    document.getElementById('dm-dns-info').style.display = 'block';
+    document.getElementById('dm-footer-form').style.display = 'none';
+    document.getElementById('dm-footer-dns').style.display = 'flex';
+    document.getElementById('domain-modal-title').textContent = 'DNS Records for ' + domainName;
+
+    var dnsType = serverDnsConfig.dnsType || 'A';
+    var dnsValue = serverDnsConfig.dnsValue || 'Not configured';
+    // Determine name from domain
+    var parts = domainName.split('.');
+    var dnsName = parts.length > 2 ? parts[0] : '@';
+
+    document.getElementById('dns-info-type').textContent = dnsType;
+    document.getElementById('dns-info-name').textContent = dnsName;
+    document.getElementById('dns-info-value').textContent = dnsValue;
+    openModal('modal-domain');
+}
+
+function showDnsInfo(id) {
+    var d = getMyDomains().find(function(x){return x.id===id;});
+    if(!d) return;
+    showDomainDnsInfo(d.domain);
+}
+
+function resetDomainModal() {
+    document.getElementById('dm-form-fields').style.display = 'block';
+    document.getElementById('dm-dns-info').style.display = 'none';
+    document.getElementById('dm-footer-form').style.display = 'flex';
+    document.getElementById('dm-footer-dns').style.display = 'none';
+}
+
+function openDomainModal(editId) {
+    resetDomainModal();
+    document.getElementById('dm-edit-id').value = editId||'';
+    document.getElementById('domain-modal-title').textContent = editId ? 'Edit Domain' : 'Add Domain';
+
+    var pages = getMyPages();
+    var opts = '<option value="">-- None --</option>' + pages.map(function(p){return '<option value="'+p.id+'">'+esc(p.name)+'</option>';}).join('');
+    document.getElementById('dm-page').innerHTML = opts;
+
+    if(editId) {
+        var d = getMyDomains().find(function(x){return x.id===editId;});
+        if(!d) return;
+        document.getElementById('dm-domain').value = d.domain||'';
+        document.getElementById('dm-page').value = d.pageId||'';
+        document.getElementById('dm-ssl').value = d.autoSSL ? 'yes' : 'no';
+        document.getElementById('dm-notes').value = d.notes||'';
+    } else {
+        ['dm-domain','dm-notes'].forEach(function(id){document.getElementById(id).value='';});
+        document.getElementById('dm-ssl').value='yes';
+        document.getElementById('dm-page').value='';
+    }
+    openModal('modal-domain');
+}
+function editDomain(id) { openDomainModal(id); }
+
+function saveDomain() {
+    var editId = document.getElementById('dm-edit-id').value;
+    var domain = document.getElementById('dm-domain').value.trim();
+    if(!domain) { showToast('Domain name is required'); return; }
+    if(!currentUser) { showToast('Not logged in'); return; }
+
+    var domains = getDomains();
+    var obj = {
+        domain: domain,
+        pageId: document.getElementById('dm-page').value,
+        dnsType: serverDnsConfig.dnsType || 'A',
+        dnsValue: serverDnsConfig.dnsValue || '',
+        autoSSL: document.getElementById('dm-ssl').value === 'yes',
+        notes: document.getElementById('dm-notes').value.trim(),
+        userId: currentUser.id
+    };
+
+    if(editId) {
+        var idx = domains.findIndex(function(d){return d.id===editId && d.userId===currentUser.id;});
+        if(idx>=0) Object.assign(domains[idx], obj);
+        saveDomains(domains);
+        closeModal('modal-domain');
+        renderDomains();
+        showToast('Domain updated');
+    } else {
+        obj.id = uid();
+        obj.created = today();
+        obj.sslActive = false;
+        obj.dnsVerified = false;
+        domains.push(obj);
+
+        if(obj.pageId) {
+            var pages = getPages();
+            var pi = pages.findIndex(function(p){return p.id===obj.pageId;});
+            if(pi>=0) { pages[pi].domain = domain; savePages(pages); }
+        }
+        saveDomains(domains);
+        renderDomains();
+        showToast('Domain "'+domain+'" added');
+        // Show DNS info after saving
+        showDomainDnsInfo(domain);
+    }
+}
+
+function deleteDomain(id) {
+    if(!confirm('Delete this domain?')) return;
+    var domains = getDomains();
+    domains = domains.filter(function(x){return !(x.id===id && x.userId===currentUser.id);});
+    saveDomains(domains);
+    renderDomains();
+    showToast('Domain deleted');
+}
+
+function verifyDns(id) {
+    var btn = document.getElementById('verify-btn-'+id);
+    if(btn) { btn.textContent = 'Checking...'; btn.disabled = true; }
+
+    fetch('/api/domains/'+id+'/verify-dns', { method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json'} })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+        if(data.verified) {
+            // Update local storage
+            var domains = getDomains();
+            var idx = domains.findIndex(function(d){return d.id===id;});
+            if(idx>=0) domains[idx].dnsVerified = true;
+            saveDomains(domains);
+            renderDomains();
+            showToast('DNS verified! You can now install SSL.');
+        } else {
+            showToast('DNS not yet propagated. Current: ' + (data.current||'none') + ', Expected: ' + (data.expected||''));
+            if(btn) { btn.textContent = 'Verify DNS'; btn.disabled = false; }
+        }
+    })
+    .catch(function(err){
+        showToast('Error verifying DNS: ' + err.message);
+        if(btn) { btn.textContent = 'Verify DNS'; btn.disabled = false; }
+    });
+}
+
+function domainSSL(id, action) {
+    var domains = getDomains();
+    var idx = domains.findIndex(function(d){return d.id===id && d.userId===currentUser.id;});
+    if(idx<0) return;
+
+    if(!domains[idx].dnsVerified && action === 'generate') {
+        showToast('Please verify DNS propagation first');
+        return;
+    }
+
+    fetch('/api/domains/'+id+'/ssl', { method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action: action}) })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+        if(data.error) { showToast(data.error); return; }
+        if(action === 'generate') {
+            domains[idx].sslActive = true;
+            domains[idx].sslDate = today();
+            showToast('SSL certificate installed for '+domains[idx].domain);
+        } else if(action === 'renew') {
+            domains[idx].sslDate = today();
+            showToast('SSL certificate renewed for '+domains[idx].domain);
+        }
+        saveDomains(domains);
+        renderDomains();
+    })
+    .catch(function(err){ showToast('SSL error: ' + err.message); });
+}
+
+// ══════════ INIT ══════════
+tryAutoLogin();
+loadDnsConfig();
+</script>
+
+</body>
+</html>
