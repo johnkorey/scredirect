@@ -892,15 +892,21 @@ app.get('/api/dns-config', requireAuth, async (req, res) => {
     const row = await queryOne("SELECT value FROM settings WHERE key = 'server_hostname'");
     if (row) serverHostname = row.value;
   }
-  // Auto-detect from request hostname if nothing configured
+  // Auto-detect: resolve hostname to IP so users always get a simple A record
   if (!serverIp && !serverHostname) {
     const host = req.hostname;
     if (host && host !== 'localhost' && host !== '127.0.0.1') {
-      // Check if it's an IP address
       if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
         serverIp = host;
       } else {
-        serverHostname = host;
+        // Resolve hostname to IP for simpler A record setup
+        try {
+          const ips = await dns.resolve4(host);
+          if (ips.length > 0) serverIp = ips[0];
+          else serverHostname = host;
+        } catch (e) {
+          serverHostname = host;
+        }
       }
     }
   }
@@ -927,8 +933,11 @@ app.post('/api/domains', requireAuth, async (req, res) => {
   if (!serverIp && !serverHostname) {
     const host = req.hostname;
     if (host && host !== 'localhost' && host !== '127.0.0.1') {
-      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) serverIp = host;
-      else serverHostname = host;
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+        serverIp = host;
+      } else {
+        try { const ips = await dns.resolve4(host); if (ips.length > 0) serverIp = ips[0]; else serverHostname = host; } catch (e) { serverHostname = host; }
+      }
     }
   }
   const dnsType = serverIp ? 'A' : (serverHostname ? 'CNAME' : 'A');
