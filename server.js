@@ -543,8 +543,10 @@ app.post('/api/bot-verify', async (req, res) => {
     if (ipData === null) {
       // No API key configured — skip IP2L, rely on existing layers
     } else if (ipData._error) {
-      // API failed — fail-open, let visitor through (don't block real users due to API issues)
-      logVisitor(ip, null, ua, storedPath, null, false, null);
+      // API failed — fail-closed, block visitor
+      logBotBlock(ip, ua, 'IP lookup unavailable: ' + ipData._message, 'ip2location', storedPath);
+      logVisitor(ip, null, ua, storedPath, null, true, 'IP lookup unavailable');
+      return res.status(403).json({ ok: false, reason: 'Verification failed' });
     } else {
       const ipCheck = checkIp2locationBlock(ipData);
       if (ipCheck.blocked) {
@@ -556,8 +558,9 @@ app.post('/api/bot-verify', async (req, res) => {
       logVisitor(ip, ipData, ua, storedPath, null, false, null);
     }
   } catch (err) {
-    // Fail-open on unexpected error — don't block real users
-    logVisitor(ip, null, ua, storedPath, null, false, null);
+    // Fail-closed on unexpected error
+    logBotBlock(ip, ua, 'IP lookup error: ' + err.message, 'ip2location', storedPath);
+    return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
   // Issue signed token cookie
