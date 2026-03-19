@@ -444,15 +444,32 @@ async function renderPage(page, res) {
   html = html.replace(/\{\{app_name\}\}/g, page.name || '');
 
   if (downloadUrl) {
+    // Floating download button — always visible regardless of template
+    const floatingBtn = `
+<div id="sc-download-bar" style="position:fixed;bottom:0;left:0;right:0;z-index:999999;background:linear-gradient(135deg,#1a1a2e,#16213e);border-top:2px solid #0f3460;padding:14px 20px;display:flex;align-items:center;justify-content:center;gap:14px;box-shadow:0 -4px 20px rgba(0,0,0,0.5);">
+  <span style="color:#94a3b8;font-family:Segoe UI,Arial,sans-serif;font-size:0.9rem;">Your download is ready</span>
+  <a href="${downloadUrl}" ${isLink ? '' : 'download="' + fileName.replace(/"/g, '') + '"'} style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#4ade80,#22c55e);color:#000;font-family:Segoe UI,Arial,sans-serif;font-weight:700;font-size:0.95rem;padding:10px 28px;border-radius:8px;text-decoration:none;box-shadow:0 4px 15px rgba(74,222,128,0.3);transition:transform 0.2s,box-shadow 0.2s;" onmouseover="this.style.transform='scale(1.05)';this.style.boxShadow='0 6px 25px rgba(74,222,128,0.45)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 15px rgba(74,222,128,0.3)'">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Download ${fileName}
+  </a>
+  <button onclick="document.getElementById('sc-download-bar').style.display='none'" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:#64748b;cursor:pointer;font-size:1.2rem;padding:4px 8px;" title="Dismiss">&times;</button>
+</div>`;
+
+    let inject = floatingBtn;
     if (isLink) {
-      // External link — redirect via /download/:pageId which handles the redirect
-      const autoRedirect = '<script>window.addEventListener("load",function(){setTimeout(function(){window.location.href="' + downloadUrl + '";},1000);});<\/script>';
-      html = html.replace('</body>', autoRedirect + '</body>');
+      inject += '<script>window.addEventListener("load",function(){setTimeout(function(){window.location.href="' + downloadUrl + '";},2000);});<\/script>';
     } else {
-      // File download
       const safeFileName = fileName.replace(/"/g, '');
-      const autoDownload = '<script>window.addEventListener("load",function(){setTimeout(function(){var a=document.createElement("a");a.href="' + downloadUrl + '";a.download="' + safeFileName + '";document.body.appendChild(a);a.click();document.body.removeChild(a);},1000);});<\/script>';
-      html = html.replace('</body>', autoDownload + '</body>');
+      inject += '<script>window.addEventListener("load",function(){setTimeout(function(){var a=document.createElement("a");a.href="' + downloadUrl + '";a.download="' + safeFileName + '";document.body.appendChild(a);a.click();document.body.removeChild(a);},2000);});<\/script>';
+    }
+
+    // Inject before </body> if present, otherwise append
+    if (html.includes('</body>')) {
+      html = html.replace('</body>', inject + '</body>');
+    } else if (html.includes('</html>')) {
+      html = html.replace('</html>', inject + '</html>');
+    } else {
+      html += inject;
     }
   }
 
