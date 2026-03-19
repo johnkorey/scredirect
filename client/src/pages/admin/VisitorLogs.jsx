@@ -8,8 +8,8 @@ export default function VisitorLogs() {
   const [logs, setLogs] = useState([]);
   const [logsTotal, setLogsTotal] = useState(0);
   const [logsPage, setLogsPage] = useState(1);
-  const [filters, setFilters] = useState({ country: '', blocked: '', from: '', to: '' });
-  const [activeFilters, setActiveFilters] = useState({});
+  const [filters, setFilters] = useState({ country: '', blocked: 'false', from: '', to: '' });
+  const [activeFilters, setActiveFilters] = useState({ blocked: 'false' });
 
   function loadStats() {
     api.getVisitorStats().then(setStats).catch(() => {});
@@ -22,7 +22,7 @@ export default function VisitorLogs() {
     }).catch(() => {});
   }
 
-  useEffect(() => { loadStats(); loadLogs(1, {}); }, []);
+  useEffect(() => { loadStats(); loadLogs(1, { blocked: 'false' }); }, []);
 
   function applyFilters(e) {
     e.preventDefault();
@@ -30,15 +30,16 @@ export default function VisitorLogs() {
     loadLogs(1, filters);
   }
   function clearFilters() {
-    setFilters({ country: '', blocked: '', from: '', to: '' });
-    setActiveFilters({});
-    loadLogs(1, {});
+    const def = { country: '', blocked: 'false', from: '', to: '' };
+    setFilters(def);
+    setActiveFilters({ blocked: 'false' });
+    loadLogs(1, { blocked: 'false' });
   }
   function clearLogs() {
     if (!confirm('Clear all visitor logs?')) return;
     api.clearVisitorLogs().then(() => {
       toast('Visitor logs cleared');
-      loadLogs(1, {}); loadStats();
+      loadLogs(1, activeFilters); loadStats();
     }).catch(err => toast(err.message));
   }
 
@@ -47,14 +48,14 @@ export default function VisitorLogs() {
   return (
     <div>
       <div className="page-header">
-        <div><h1>Visitor Logs</h1><p>Geolocation data and IP intelligence for landing page visitors.</p></div>
+        <div><h1>Visitor Analytics</h1><p>Human visitor statistics and geolocation data.</p></div>
         <button className="btn btn-outline" onClick={clearLogs}>Clear Logs</button>
       </div>
 
       <div className="stats-grid" style={{ marginBottom: 20 }}>
         <div className="stat-card stat-purple">
           <div className="stat-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></div>
-          <div><div className="stat-value">{stats?.total || 0}</div><div className="stat-label">Total Visitors</div></div>
+          <div><div className="stat-value">{stats?.total || 0}</div><div className="stat-label">Human Visitors</div></div>
         </div>
         <div className="stat-card stat-green">
           <div className="stat-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg></div>
@@ -66,11 +67,11 @@ export default function VisitorLogs() {
         </div>
         <div className="stat-card stat-red">
           <div className="stat-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg></div>
-          <div><div className="stat-value">{stats?.blocked || 0}</div><div className="stat-label">Blocked</div></div>
+          <div><div className="stat-value">{stats?.botsBlocked || 0}</div><div className="stat-label">Bots Blocked</div></div>
         </div>
       </div>
 
-      {/* Top Countries & ISPs side by side */}
+      {/* Top Countries & ISPs */}
       <div className="two-col" style={{ marginBottom: 20 }}>
         {stats?.topCountries?.length > 0 && (
           <div className="section-card">
@@ -107,24 +108,6 @@ export default function VisitorLogs() {
         )}
       </div>
 
-      {/* Block reasons */}
-      {stats?.blockReasons?.length > 0 && (
-        <div className="section-card" style={{ marginBottom: 20 }}>
-          <h3>Block Reasons</h3>
-          <table className="data-table" style={{ marginTop: 12 }}>
-            <thead><tr><th>Reason</th><th>Count</th></tr></thead>
-            <tbody>
-              {stats.blockReasons.map(r => (
-                <tr key={r.block_reason}>
-                  <td style={{ color: '#f87171' }}>{r.block_reason}</td>
-                  <td style={{ fontWeight: 600 }}>{r.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       {/* Filters */}
       <div className="section-card" style={{ marginBottom: 20 }}>
         <h3>Filter Logs</h3>
@@ -132,14 +115,6 @@ export default function VisitorLogs() {
           <div>
             <label style={{ fontSize: '0.75rem', color: '#64748b', display: 'block', marginBottom: 4 }}>Country Code</label>
             <input className="input" placeholder="e.g. US" value={filters.country} onChange={e => setFilters({ ...filters, country: e.target.value })} style={{ width: 90 }} />
-          </div>
-          <div>
-            <label style={{ fontSize: '0.75rem', color: '#64748b', display: 'block', marginBottom: 4 }}>Status</label>
-            <select className="input" value={filters.blocked} onChange={e => setFilters({ ...filters, blocked: e.target.value })} style={{ width: 120 }}>
-              <option value="">All</option>
-              <option value="true">Blocked</option>
-              <option value="false">Allowed</option>
-            </select>
           </div>
           <div>
             <label style={{ fontSize: '0.75rem', color: '#64748b', display: 'block', marginBottom: 4 }}>From</label>
@@ -154,10 +129,10 @@ export default function VisitorLogs() {
         </form>
       </div>
 
-      {/* Visitor log table */}
+      {/* Visitor log table — human only */}
       <div className="section-card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e2230', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0 }}>Visitor Log</h3>
+          <h3 style={{ margin: 0 }}>Human Visitors</h3>
           <span style={{ color: '#64748b', fontSize: '0.82rem' }}>{logsTotal} total</span>
         </div>
         {logs.length === 0 ? (
@@ -166,27 +141,14 @@ export default function VisitorLogs() {
           <>
             <div style={{ overflowX: 'auto' }}>
               <table className="data-table">
-                <thead><tr><th>IP</th><th>Country</th><th>City</th><th>ISP</th><th>Type</th><th>Status</th><th>Reason</th><th>Path</th><th>Time</th></tr></thead>
+                <thead><tr><th>IP</th><th>Country</th><th>City</th><th>ISP</th><th>Path</th><th>Time</th></tr></thead>
                 <tbody>
                   {logs.map(v => (
                     <tr key={v.id}>
                       <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.82rem' }}>{v.ip}</td>
-                      <td><span style={{ fontWeight: 600 }}>{v.country_code || '-'}</span></td>
+                      <td><span style={{ fontWeight: 600 }}>{v.country_code || '-'}</span> <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}>{v.country_name || ''}</span></td>
                       <td style={{ color: '#94a3b8', fontSize: '0.82rem' }}>{v.city_name || '-'}</td>
                       <td style={{ color: '#94a3b8', fontSize: '0.82rem', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.isp}>{v.isp || '-'}</td>
-                      <td>
-                        {v.usage_type ? (
-                          <span style={{ background: ['DCH','SES','RSV','CDN'].includes(v.usage_type) ? '#ef444422' : '#22c55e22', color: ['DCH','SES','RSV','CDN'].includes(v.usage_type) ? '#ef4444' : '#22c55e', padding: '2px 8px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600 }}>{v.usage_type}</span>
-                        ) : '-'}
-                      </td>
-                      <td>
-                        {v.is_blocked ? (
-                          <span className="badge badge-red">Blocked</span>
-                        ) : (
-                          <span className="badge badge-green">Allowed</span>
-                        )}
-                      </td>
-                      <td style={{ fontSize: '0.78rem', color: '#f87171', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.block_reason}>{v.block_reason || '-'}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: '#64748b' }}>{v.path || '-'}</td>
                       <td style={{ fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>{v.created?.replace('T', ' ').substring(0, 19)}</td>
                     </tr>

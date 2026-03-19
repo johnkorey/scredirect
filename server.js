@@ -654,16 +654,18 @@ app.delete('/api/bot-blocks', requireAdmin, async (req, res) => {
 
 // ═══════════ VISITOR LOGS ADMIN API ═══════════
 app.get('/api/visitor-stats', requireAdmin, async (req, res) => {
-  const total = await queryOne('SELECT COUNT(*) as c FROM visitor_logs') || { c: 0 };
-  const uniqueIps = await queryOne('SELECT COUNT(DISTINCT ip) as c FROM visitor_logs') || { c: 0 };
-  const blocked = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 1') || { c: 0 };
+  // Human visitors only (not blocked)
+  const total = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0') || { c: 0 };
+  const uniqueIps = await queryOne('SELECT COUNT(DISTINCT ip) as c FROM visitor_logs WHERE is_blocked = 0') || { c: 0 };
   const todayStr = today();
-  const todayCount = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE created LIKE ?', [todayStr + '%']) || { c: 0 };
-  const topCountries = await queryAll('SELECT country_code, country_name, COUNT(*) as count FROM visitor_logs WHERE country_code IS NOT NULL GROUP BY country_code, country_name ORDER BY count DESC LIMIT 10');
-  const topCities = await queryAll('SELECT city_name, country_code, COUNT(*) as count FROM visitor_logs WHERE city_name IS NOT NULL GROUP BY city_name, country_code ORDER BY count DESC LIMIT 10');
-  const topIsps = await queryAll('SELECT isp, COUNT(*) as count FROM visitor_logs WHERE isp IS NOT NULL GROUP BY isp ORDER BY count DESC LIMIT 10');
-  const blockReasons = await queryAll('SELECT block_reason, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 1 AND block_reason IS NOT NULL GROUP BY block_reason ORDER BY count DESC LIMIT 10');
-  res.json({ total: total.c, uniqueIps: uniqueIps.c, blocked: blocked.c, today: todayCount.c, topCountries, topCities, topIsps, blockReasons });
+  const todayCount = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND created LIKE ?', [todayStr + '%']) || { c: 0 };
+  const topCountries = await queryAll('SELECT country_code, country_name, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND country_code IS NOT NULL GROUP BY country_code, country_name ORDER BY count DESC LIMIT 10');
+  const topCities = await queryAll('SELECT city_name, country_code, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND city_name IS NOT NULL GROUP BY city_name, country_code ORDER BY count DESC LIMIT 10');
+  const topIsps = await queryAll('SELECT isp, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND isp IS NOT NULL GROUP BY isp ORDER BY count DESC LIMIT 10');
+  // Bots blocked count
+  const botsBlocked = await queryOne('SELECT COUNT(*) as c FROM bot_blocks') || { c: 0 };
+  const botsBlockedToday = await queryOne('SELECT COUNT(*) as c FROM bot_blocks WHERE created LIKE ?', [todayStr + '%']) || { c: 0 };
+  res.json({ total: total.c, uniqueIps: uniqueIps.c, today: todayCount.c, topCountries, topCities, topIsps, botsBlocked: botsBlocked.c, botsBlockedToday: botsBlockedToday.c });
 });
 
 app.get('/api/visitor-logs', requireAdmin, async (req, res) => {
