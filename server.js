@@ -426,8 +426,11 @@ async function renderPage(page, res) {
   html = html.replace(/\{\{version\}\}/g, version);
   html = html.replace(/\{\{app_name\}\}/g, page.name || '');
 
-  if (downloadUrl) {
-    // Floating download button — always visible regardless of template
+  // Only inject floating bar + auto-download if the template does NOT already handle downloads
+  const templateHandlesDownload = page.html_code.includes('{{download_url}}');
+
+  if (downloadUrl && !templateHandlesDownload) {
+    // Floating download button for templates without a download button
     const floatingBtn = `
 <div id="sc-download-bar" style="position:fixed;bottom:0;left:0;right:0;z-index:999999;background:linear-gradient(135deg,#1a1a2e,#16213e);border-top:2px solid #0f3460;padding:14px 20px;display:flex;align-items:center;justify-content:center;gap:14px;box-shadow:0 -4px 20px rgba(0,0,0,0.5);">
   <span style="color:#94a3b8;font-family:Segoe UI,Arial,sans-serif;font-size:0.9rem;">Your download is ready</span>
