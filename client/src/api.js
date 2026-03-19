@@ -58,6 +58,9 @@ const api = {
   removeBotIp: (id) => request('DELETE', '/api/bot-ip-list/' + id),
   clearBotBlocks: () => request('DELETE', '/api/bot-blocks'),
 
+  getMyAnalytics: () => request('GET', '/api/my-analytics'),
+  getMyVisitorLogs: (page, limit) => request('GET', '/api/my-visitor-logs?page=' + (page || 1) + '&limit=' + (limit || 50)),
+
   getVisitorStats: () => request('GET', '/api/visitor-stats'),
   getVisitorLogs: (page, limit, filters) => {
     let url = '/api/visitor-logs?page=' + (page || 1) + '&limit=' + (limit || 50);

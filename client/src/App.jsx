@@ -14,6 +14,7 @@ import UserHome from './pages/user/Home';
 import UserFiles from './pages/user/Files';
 import UserDomains from './pages/user/Domains';
 import UserLinks from './pages/user/Links';
+import UserAnalytics from './pages/user/Analytics';
 
 function ProtectedRoute({ children, requiredRole }) {
   const { user, loading } = useAuth();
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/user/files" element={<ProtectedRoute><Layout><UserFiles /></Layout></ProtectedRoute>} />
         <Route path="/user/domains" element={<ProtectedRoute><Layout><UserDomains /></Layout></ProtectedRoute>} />
         <Route path="/user/links" element={<ProtectedRoute><Layout><UserLinks /></Layout></ProtectedRoute>} />
+        <Route path="/user/analytics" element={<ProtectedRoute><Layout><UserAnalytics /></Layout></ProtectedRoute>} />
 
         <Route path="/" element={
           loading ? null : user ? <Navigate to={user.role === 'Admin' ? '/admin' : '/user'} /> : <Navigate to="/login" />

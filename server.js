@@ -694,6 +694,42 @@ app.delete('/api/visitor-logs', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ═══════════ USER ANALYTICS ═══════════
+app.get('/api/my-analytics', requireAuth, async (req, res) => {
+  // Get page IDs from user's domains
+  const domains = await queryAll('SELECT page_id FROM domains WHERE user_id = ? AND page_id IS NOT NULL', [req.session.user.id]);
+  const pageIds = domains.map(d => d.page_id).filter(Boolean);
+  if (pageIds.length === 0) return res.json({ total: 0, uniqueIps: 0, today: 0, botsBlocked: 0, topCountries: [], topCities: [], topIsps: [] });
+
+  const placeholders = pageIds.map((_, i) => '$' + (i + 1)).join(',');
+  const total = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND page_id IN (' + placeholders + ')', pageIds) || { c: 0 };
+  const uniqueIps = await rawQueryOne('SELECT COUNT(DISTINCT ip) as c FROM visitor_logs WHERE is_blocked = 0 AND page_id IN (' + placeholders + ')', pageIds) || { c: 0 };
+  const todayStr = today();
+  const todayParams = [todayStr + '%', ...pageIds];
+  const todayCount = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND created LIKE $1 AND page_id IN (' + pageIds.map((_, i) => '$' + (i + 2)).join(',') + ')', todayParams) || { c: 0 };
+  const topCountries = await rawQueryAll('SELECT country_code, country_name, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND country_code IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY country_code, country_name ORDER BY count DESC LIMIT 10', pageIds);
+  const topCities = await rawQueryAll('SELECT city_name, country_code, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND city_name IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY city_name, country_code ORDER BY count DESC LIMIT 10', pageIds);
+  const topIsps = await rawQueryAll('SELECT isp, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND isp IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY isp ORDER BY count DESC LIMIT 10', pageIds);
+  const botsBlocked = await rawQueryOne('SELECT COUNT(*) as c FROM bot_blocks WHERE path ~ $1', ['/page/(' + pageIds.join('|') + ')']) || { c: 0 };
+  res.json({ total: total.c, uniqueIps: uniqueIps.c, today: todayCount.c, botsBlocked: botsBlocked.c, topCountries, topCities, topIsps });
+});
+
+app.get('/api/my-visitor-logs', requireAuth, async (req, res) => {
+  const domains = await queryAll('SELECT page_id FROM domains WHERE user_id = ? AND page_id IS NOT NULL', [req.session.user.id]);
+  const pageIds = domains.map(d => d.page_id).filter(Boolean);
+  if (pageIds.length === 0) return res.json({ logs: [], total: 0, page: 1 });
+
+  const page = parseInt(req.query.page) || 1;
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = (page - 1) * limit;
+
+  const placeholders = pageIds.map((_, i) => '$' + (i + 1)).join(',');
+  const total = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND page_id IN (' + placeholders + ')', pageIds) || { c: 0 };
+  const allParams = [...pageIds, limit, offset];
+  const logs = await rawQueryAll('SELECT * FROM visitor_logs WHERE is_blocked = 0 AND page_id IN (' + placeholders + ') ORDER BY id DESC LIMIT $' + (pageIds.length + 1) + ' OFFSET $' + (pageIds.length + 2), allParams);
+  res.json({ logs, total: total.c, page });
+});
+
 // ═══════════ AUTH ═══════════
 app.post('/api/auth/login', loginGuard, async (req, res) => {
   const { email, password } = req.body;
