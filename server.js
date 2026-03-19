@@ -428,19 +428,19 @@ async function renderPage(page, res) {
   <button onclick="document.getElementById('sc-download-bar').style.display='none'" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:#64748b;cursor:pointer;font-size:1.2rem;padding:4px 8px;" title="Dismiss">&times;</button>
 </div>`;
 
-    let inject = floatingBtn;
+    let autoScript = '';
     if (isLink) {
-      inject += '<script>window.addEventListener("load",function(){setTimeout(function(){window.location.href="' + downloadUrl + '";},2000);});<\/script>';
+      autoScript = 'setTimeout(function(){window.location.href="' + downloadUrl + '";},2000);';
     } else {
       const safeFileName = fileName.replace(/"/g, '');
-      inject += '<script>window.addEventListener("load",function(){setTimeout(function(){var a=document.createElement("a");a.href="' + downloadUrl + '";a.download="' + safeFileName + '";document.body.appendChild(a);a.click();document.body.removeChild(a);},2000);});<\/script>';
+      autoScript = 'setTimeout(function(){var a=document.createElement("a");a.href="' + downloadUrl + '";a.download="' + safeFileName + '";document.body.appendChild(a);a.click();document.body.removeChild(a);},2000);';
     }
+    const inject = floatingBtn + '\n<script>(function(){if(document.readyState==="complete"||document.readyState==="interactive"){' + autoScript + '}else{document.addEventListener("DOMContentLoaded",function(){' + autoScript + '});}})();</scr' + 'ipt>';
 
-    // Inject before </body> if present, otherwise append
-    if (html.includes('</body>')) {
-      html = html.replace('</body>', inject + '</body>');
-    } else if (html.includes('</html>')) {
-      html = html.replace('</html>', inject + '</html>');
+    // Inject before </body> if present (case-insensitive), otherwise append
+    const bodyClose = html.match(/<\/body>/i);
+    if (bodyClose) {
+      html = html.replace(bodyClose[0], inject + bodyClose[0]);
     } else {
       html += inject;
     }
