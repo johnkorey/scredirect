@@ -37,6 +37,7 @@ const api = {
     fd.append('file', file);
     return request('POST', '/api/pages/' + pageId + '/upload', fd, true);
   },
+  addLink: (pageId, data) => request('POST', '/api/pages/' + pageId + '/link', data),
   activateVersion: (id) => request('PUT', '/api/versions/' + id + '/activate'),
   deleteVersion: (id) => request('DELETE', '/api/versions/' + id),
 
@@ -45,6 +46,8 @@ const api = {
   updateDomain: (id, data) => request('PUT', '/api/domains/' + id, data),
   deleteDomain: (id) => request('DELETE', '/api/domains/' + id),
   domainSSL: (id, action) => request('POST', '/api/domains/' + id + '/ssl', { action }),
+  verifyDns: (id) => request('POST', '/api/domains/' + id + '/verify-dns'),
+  getDnsConfig: () => request('GET', '/api/dns-config'),
 
   getLinks: () => request('GET', '/api/links'),
 
