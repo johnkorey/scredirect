@@ -11,7 +11,7 @@ const { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne, pool } = r
 const pgSession = require('connect-pg-simple')(session);
 
 const app = express();
-app.set('trust proxy', false);
+app.set('trust proxy', true);
 const PORT = process.env.PORT || 3000;
 
 // Middleware
@@ -110,11 +110,12 @@ const BOT_UA_PATTERNS = [
 ];
 
 function getClientIp(req) {
-  // Direct VPS — use real TCP connection IP, ignore x-forwarded-for (could be spoofed)
-  const realIp = req.socket.remoteAddress || req.connection.remoteAddress || req.ip;
+  // Behind reverse proxy (Zeabur, Cloudflare, etc.) — trust x-forwarded-for
+  const xff = req.headers['x-forwarded-for'];
+  const ip = xff ? xff.split(',')[0].trim() : (req.socket.remoteAddress || req.ip);
   // Normalize IPv6-mapped IPv4 (::ffff:1.2.3.4 -> 1.2.3.4)
-  if (realIp && realIp.startsWith('::ffff:')) return realIp.substring(7);
-  return realIp || 'unknown';
+  if (ip && ip.startsWith('::ffff:')) return ip.substring(7);
+  return ip || 'unknown';
 }
 
 function isKnownBot(ua) {
@@ -542,10 +543,8 @@ app.post('/api/bot-verify', async (req, res) => {
     if (ipData === null) {
       // No API key configured — skip IP2L, rely on existing layers
     } else if (ipData._error) {
-      // API failed — fail-closed, block visitor
-      logBotBlock(ip, ua, 'IP lookup unavailable: ' + ipData._message, 'ip2location', storedPath);
-      logVisitor(ip, null, ua, storedPath, null, true, 'IP lookup unavailable');
-      return res.status(403).json({ ok: false, reason: 'Verification failed' });
+      // API failed — fail-open, let visitor through (don't block real users due to API issues)
+      logVisitor(ip, null, ua, storedPath, null, false, null);
     } else {
       const ipCheck = checkIp2locationBlock(ipData);
       if (ipCheck.blocked) {
@@ -557,9 +556,8 @@ app.post('/api/bot-verify', async (req, res) => {
       logVisitor(ip, ipData, ua, storedPath, null, false, null);
     }
   } catch (err) {
-    // Fail-closed on unexpected error
-    logBotBlock(ip, ua, 'IP lookup error: ' + err.message, 'ip2location', storedPath);
-    return res.status(403).json({ ok: false, reason: 'Verification failed' });
+    // Fail-open on unexpected error — don't block real users
+    logVisitor(ip, null, ua, storedPath, null, false, null);
   }
 
   // Issue signed token cookie
