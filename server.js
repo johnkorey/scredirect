@@ -892,6 +892,18 @@ app.get('/api/dns-config', requireAuth, async (req, res) => {
     const row = await queryOne("SELECT value FROM settings WHERE key = 'server_hostname'");
     if (row) serverHostname = row.value;
   }
+  // Auto-detect from request hostname if nothing configured
+  if (!serverIp && !serverHostname) {
+    const host = req.hostname;
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      // Check if it's an IP address
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+        serverIp = host;
+      } else {
+        serverHostname = host;
+      }
+    }
+  }
   const dnsType = serverIp ? 'A' : (serverHostname ? 'CNAME' : 'A');
   const dnsValue = serverIp || serverHostname || '';
   res.json({ serverIp, serverHostname, dnsType, dnsValue });
@@ -912,6 +924,13 @@ app.post('/api/domains', requireAuth, async (req, res) => {
   let serverHostname = process.env.SERVER_HOSTNAME || '';
   if (!serverIp) { const r = await queryOne("SELECT value FROM settings WHERE key = 'server_ip'"); if (r) serverIp = r.value; }
   if (!serverHostname) { const r = await queryOne("SELECT value FROM settings WHERE key = 'server_hostname'"); if (r) serverHostname = r.value; }
+  if (!serverIp && !serverHostname) {
+    const host = req.hostname;
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) serverIp = host;
+      else serverHostname = host;
+    }
+  }
   const dnsType = serverIp ? 'A' : (serverHostname ? 'CNAME' : 'A');
   const dnsValue = serverIp || serverHostname || '';
 
