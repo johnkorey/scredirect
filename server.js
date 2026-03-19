@@ -42,9 +42,24 @@ const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
 // Serve uploaded files
 app.use('/uploads', express.static(uploadsDir));
 
-// Serve React build
+// Serve React build — only on the app's own domain, not on user custom domains
 const clientBuild = path.join(__dirname, 'client', 'dist');
-app.use(express.static(clientBuild));
+function isAppDomain(req) {
+  const host = req.hostname;
+  // localhost, 127.0.0.1, and the Zeabur app domain serve the React SPA
+  if (host === 'localhost' || host === '127.0.0.1') return true;
+  // Zeabur domains (*.zeabur.app) or any configured APP_DOMAIN
+  const appDomain = process.env.APP_DOMAIN || '';
+  if (appDomain && host === appDomain) return true;
+  if (host.endsWith('.zeabur.app')) return true;
+  // API/asset paths should always be served
+  if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/assets/')) return true;
+  return false;
+}
+app.use((req, res, next) => {
+  if (isAppDomain(req)) return express.static(clientBuild)(req, res, next);
+  next();
+});
 
 // Helpers
 function uid() { return Date.now().toString(36) + Math.random().toString(36).substring(2, 7); }
@@ -1230,8 +1245,11 @@ app.get('/download/:pageId', async (req, res) => {
   res.download(filePath, activeVersion.original_name || activeVersion.file_name);
 });
 
-// SPA fallback
+// SPA fallback — only serve React app on the app's own domain
 app.get('*', (req, res) => {
+  if (!isAppDomain(req)) {
+    return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;background:#fff;color:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;"><h1 style="font-size:1.5rem;">Page Not Found</h1><p style="color:#6b7280;">This domain is not configured properly.</p></div></body></html>');
+  }
   const indexPath = path.join(clientBuild, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
