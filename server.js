@@ -972,17 +972,38 @@ app.post('/api/domains/:id/verify-dns', requireAuth, async (req, res) => {
   if (!expected) return res.status(400).json({ error: 'No DNS target configured. Set SERVER_IP or SERVER_HOSTNAME in settings.' });
 
   try {
-    let current = [];
-    if (dom.dns_type === 'A') {
-      current = await dns.resolve4(dom.domain);
-    } else {
-      current = await dns.resolveCname(dom.domain);
+    let verified = false;
+    let currentResults = [];
+
+    // Try CNAME lookup first
+    try {
+      const cnames = await dns.resolveCname(dom.domain);
+      currentResults.push(...cnames.map(c => 'CNAME: ' + c));
+      // Check exact match or match without trailing dot
+      verified = cnames.some(c => c === expected || c === expected + '.' || c.replace(/\.$/, '') === expected);
+    } catch (e) { /* no CNAME record, try A */ }
+
+    // Try A record lookup
+    if (!verified) {
+      try {
+        const ips = await dns.resolve4(dom.domain);
+        currentResults.push(...ips.map(ip => 'A: ' + ip));
+        // If expected is a hostname, resolve it to IP and compare
+        if (!verified && !/^\d{1,3}(\.\d{1,3}){3}$/.test(expected)) {
+          try {
+            const expectedIps = await dns.resolve4(expected);
+            verified = ips.some(ip => expectedIps.includes(ip));
+          } catch (e) { /* couldn't resolve expected hostname */ }
+        } else {
+          verified = ips.includes(expected);
+        }
+      } catch (e) { /* no A record either */ }
     }
-    const verified = current.includes(expected);
+
     if (verified) {
       await runSql('UPDATE domains SET dns_verified = 1 WHERE id = ?', [req.params.id]);
     }
-    res.json({ verified, current: current.join(', '), expected });
+    res.json({ verified, current: currentResults.join(', ') || 'No DNS records found', expected });
   } catch (err) {
     res.json({ verified: false, current: 'DNS lookup failed: ' + (err.code || err.message), expected });
   }
