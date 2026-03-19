@@ -465,7 +465,7 @@ async function renderPage(page, res) {
 // Domain-based routing middleware
 app.use(async (req, res, next) => {
   const host = req.hostname;
-  if (host === 'localhost' || host === '127.0.0.1' || req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/assets/')) return next();
+  if (host === 'localhost' || host === '127.0.0.1' || req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/assets/') || req.path.startsWith('/download/') || req.path.startsWith('/page/')) return next();
 
   const domainRecord = await queryOne('SELECT p.id, p.html_code, p.name, p.status FROM domains d LEFT JOIN pages p ON d.page_id = p.id WHERE d.domain = ?', [host]);
   if (!domainRecord || !domainRecord.id || !domainRecord.html_code) return next();
