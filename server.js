@@ -231,7 +231,7 @@ function checkIp2locationBlock(ipData) {
   if (p.is_data_center) reasons.push('Data center IP');
   if (p.is_botnet) reasons.push('Botnet detected');
   if (p.is_scanner) reasons.push('Scanner detected');
-  if (p.is_spammer) reasons.push('Spammer detected');
+  // is_spammer not used — too many false positives
   if (p.is_public_proxy) reasons.push('Public proxy');
   if (p.is_web_proxy) reasons.push('Web proxy');
   if (p.is_web_crawler) reasons.push('Web crawler');
