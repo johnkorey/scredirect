@@ -9,6 +9,7 @@ export default function LandingPages() {
   const [modal, setModal] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ name: '', htmlCode: '', status: 'active' });
+  const [deployPage, setDeployPage] = useState(null);
 
   function load() {
     api.getPages().then(setPages).catch(() => {});
@@ -52,6 +53,14 @@ export default function LandingPages() {
     } catch (err) { toast(err.message); }
   }
 
+  async function rotate(pageId) {
+    if (!confirm('Rotate the deployment secret? The currently-deployed index.php will stop working until you upload the new one.')) return;
+    try {
+      await api.rotatePageShimSecret(pageId);
+      toast('Secret rotated — re-download index.php and replace it where deployed.');
+    } catch (err) { toast(err.message); }
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -81,6 +90,7 @@ export default function LandingPages() {
                   {activeV && <> &bull; Active: v{activeV.version}</>}
                 </div>
                 <div className="btn-row">
+                  <button className="btn btn-primary btn-sm" onClick={() => setDeployPage(p)}>Deploy</button>
                   <button className="btn btn-outline btn-sm" onClick={() => openEdit(p)}>Edit</button>
                   <a className="btn btn-outline btn-sm" href={'/page/' + p.id} target="_blank" rel="noopener">Preview</a>
                   <button className="btn btn-danger btn-sm" onClick={() => del(p.id, p.name)}>Delete</button>
@@ -128,6 +138,39 @@ export default function LandingPages() {
           <code>{'{{version}}'}</code> — Current version<br/>
           <code>{'{{app_name}}'}</code> — Page name
         </div>
+      </Modal>
+
+      <Modal
+        title={deployPage ? 'Deploy "' + deployPage.name + '"' : 'Deploy'}
+        show={!!deployPage}
+        onClose={() => setDeployPage(null)}
+        footer={<button className="btn btn-primary" onClick={() => setDeployPage(null)}>Done</button>}
+      >
+        {deployPage && (
+          <div>
+            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: 14 }}>
+              Download both files and upload them to the document root of any host that should serve this page — a cPanel domain, a subdomain, or a server you can reach by IP. No DNS configuration on this side is required.
+            </p>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+              <a className="btn btn-primary" href={api.shimZipUrl(deployPage.id)} download>Download deployment (.zip)</a>
+            </div>
+            <div style={{ padding: 14, background: '#0f1117', borderRadius: 8, border: '1px solid #1e2230', color: '#94a3b8', fontSize: '0.82rem', lineHeight: 1.7 }}>
+              <strong style={{ color: '#f1f5f9' }}>Setup</strong>
+              <ol style={{ paddingLeft: 20, marginTop: 6 }}>
+                <li>Open the document root of the host that should serve this page (e.g. <code>public_html</code> on cPanel).</li>
+                <li>Extract the zip. You'll get <code>index.php</code> and <code>.htaccess</code>; upload both. If <code>.htaccess</code> already exists, merge the rewrite rules.</li>
+                <li>Ensure <strong>mod_rewrite</strong> and the <strong>cURL</strong> PHP extension are enabled (both are standard).</li>
+                <li>Visit the host. The full antibot pipeline runs here; the visitor only sees the host's URL.</li>
+              </ol>
+            </div>
+            <div style={{ marginTop: 14, padding: 12, background: '#1a1206', borderRadius: 8, border: '1px solid #3a2406', color: '#fbbf24', fontSize: '0.78rem' }}>
+              <strong>Security:</strong> the downloaded <code>index.php</code> contains a secret unique to this landing page. Don't share it. If it leaks, rotate below.
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <button className="btn btn-danger btn-sm" onClick={() => rotate(deployPage.id)}>Rotate Secret</button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

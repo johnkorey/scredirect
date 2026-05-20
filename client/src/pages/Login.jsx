@@ -32,7 +32,7 @@ export default function Login() {
         {error && <p className="error">{error}</p>}
         <div className="form-group">
           <label>Email</label>
-          <input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@admin.com" required />
+          <input className="form-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" required />
         </div>
         <div className="form-group">
           <label>Password</label>
@@ -41,9 +41,6 @@ export default function Login() {
         <button className="btn btn-primary" style={{ width: '100%', padding: '11px', marginTop: 6 }} disabled={loading}>
           {loading ? 'Signing in...' : 'Sign In'}
         </button>
-        <p style={{ textAlign: 'center', marginTop: 16, fontSize: '0.75rem', color: '#475569' }}>
-          Default admin: admin@admin.com / admin123
-        </p>
       </form>
     </div>
   );

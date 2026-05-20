@@ -12,8 +12,6 @@ import AdminBots from './pages/admin/BotProtection';
 import AdminVisitors from './pages/admin/VisitorLogs';
 import UserHome from './pages/user/Home';
 import UserFiles from './pages/user/Files';
-import UserDomains from './pages/user/Domains';
-import UserLinks from './pages/user/Links';
 import UserAnalytics from './pages/user/Analytics';
 
 function ProtectedRoute({ children, requiredRole }) {
@@ -43,8 +41,6 @@ export default function App() {
 
         <Route path="/user" element={<ProtectedRoute><Layout><UserHome /></Layout></ProtectedRoute>} />
         <Route path="/user/files" element={<ProtectedRoute><Layout><UserFiles /></Layout></ProtectedRoute>} />
-        <Route path="/user/domains" element={<ProtectedRoute><Layout><UserDomains /></Layout></ProtectedRoute>} />
-        <Route path="/user/links" element={<ProtectedRoute><Layout><UserLinks /></Layout></ProtectedRoute>} />
         <Route path="/user/analytics" element={<ProtectedRoute><Layout><UserAnalytics /></Layout></ProtectedRoute>} />
 
         <Route path="/" element={

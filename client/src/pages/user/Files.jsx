@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import api from '../../api';
+import Modal from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 
 export default function Files() {
@@ -13,6 +14,16 @@ export default function Files() {
   const [linkUrl, setLinkUrl] = useState('');
   const [linkNotes, setLinkNotes] = useState('');
   const [addingLink, setAddingLink] = useState(false);
+  const [deployModal, setDeployModal] = useState(false);
+
+  async function rotate() {
+    if (!selectedPage) return;
+    if (!confirm('Rotate the deployment secret? The currently-deployed index.php will stop working until you upload the new one.')) return;
+    try {
+      await api.rotatePageShimSecret(selectedPage);
+      toast('Secret rotated — re-download index.php and replace it where deployed.');
+    } catch (err) { toast(err.message); }
+  }
 
   function load() {
     api.getPages().then(p => {
@@ -95,6 +106,9 @@ export default function Files() {
             {pages.map(p => <option key={p.id} value={p.id}>{p.name} ({p.status})</option>)}
           </select>
           <span className="badge badge-green">{activeV ? 'Active: v' + activeV.version : 'No active version'}</span>
+          {selectedPage && (
+            <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setDeployModal(true)}>Deploy to a host</button>
+          )}
         </div>
       </div>
 
@@ -202,6 +216,39 @@ export default function Files() {
           </table>
         )}
       </div>
+
+      <Modal
+        title={page ? 'Deploy "' + page.name + '"' : 'Deploy'}
+        show={deployModal}
+        onClose={() => setDeployModal(false)}
+        footer={<button className="btn btn-primary" onClick={() => setDeployModal(false)}>Done</button>}
+      >
+        {page && (
+          <div>
+            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: 14 }}>
+              Drop the two files below into the document root of any host (cPanel domain, subdomain, or a server reachable by IP). No DNS setup on this side is required.
+            </p>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+              <a className="btn btn-primary" href={api.shimZipUrl(page.id)} download>Download deployment (.zip)</a>
+            </div>
+            <div style={{ padding: 14, background: '#0f1117', borderRadius: 8, border: '1px solid #1e2230', color: '#94a3b8', fontSize: '0.82rem', lineHeight: 1.7 }}>
+              <strong style={{ color: '#f1f5f9' }}>Setup</strong>
+              <ol style={{ paddingLeft: 20, marginTop: 6 }}>
+                <li>Open the document root of the host that should serve this page (e.g. <code>public_html</code> on cPanel).</li>
+                <li>Extract the zip. You'll get <code>index.php</code> and <code>.htaccess</code>; upload both. If <code>.htaccess</code> already exists, merge the rewrite rules.</li>
+                <li>Ensure <strong>mod_rewrite</strong> and the <strong>cURL</strong> PHP extension are enabled.</li>
+                <li>Visit the host. The antibot pipeline runs here; the visitor only sees the host's URL.</li>
+              </ol>
+            </div>
+            <div style={{ marginTop: 14, padding: 12, background: '#1a1206', borderRadius: 8, border: '1px solid #3a2406', color: '#fbbf24', fontSize: '0.78rem' }}>
+              <strong>Security:</strong> the downloaded <code>index.php</code> contains a secret unique to this landing page. Don't share it. If it leaks, rotate below.
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <button className="btn btn-danger btn-sm" onClick={rotate}>Rotate Secret</button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

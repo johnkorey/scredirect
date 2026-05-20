@@ -1,0 +1,16 @@
+# SC Landing Pages shim — routes every URI through index.php so the antibot
+# pipeline on the central server sees the visitor's original path.
+
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [L,QSA]
+
+# Don't let Apache strip the Authorization header (some shared hosts do this).
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
+
+# Hide the .htaccess itself.
+<Files ".htaccess">
+    Require all denied
+</Files>

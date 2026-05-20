@@ -41,13 +41,8 @@ const api = {
   activateVersion: (id) => request('PUT', '/api/versions/' + id + '/activate'),
   deleteVersion: (id) => request('DELETE', '/api/versions/' + id),
 
-  getDomains: () => request('GET', '/api/domains'),
-  createDomain: (data) => request('POST', '/api/domains', data),
-  updateDomain: (id, data) => request('PUT', '/api/domains/' + id, data),
-  deleteDomain: (id) => request('DELETE', '/api/domains/' + id),
-  domainSSL: (id, action) => request('POST', '/api/domains/' + id + '/ssl', { action }),
-  verifyDns: (id) => request('POST', '/api/domains/' + id + '/verify-dns'),
-  getDnsConfig: () => request('GET', '/api/dns-config'),
+  rotatePageShimSecret: (pageId) => request('POST', '/api/pages/' + pageId + '/rotate-shim-secret'),
+  shimZipUrl: (pageId) => '/api/pages/' + pageId + '/shim-zip',
 
   getLinks: () => request('GET', '/api/links'),
 

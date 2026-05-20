@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const https = require('https');
 const dns = require('dns').promises;
 const { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne, pool } = require('./db');
@@ -125,6 +126,8 @@ const BOT_UA_PATTERNS = [
 ];
 
 function getClientIp(req) {
+  // PHP shim already authenticated the request and supplied the visitor's real IP.
+  if (req._shimRealIp) return req._shimRealIp;
   // Behind reverse proxy (Zeabur, Cloudflare, etc.) — trust x-forwarded-for
   const xff = req.headers['x-forwarded-for'];
   const ip = xff ? xff.split(',')[0].trim() : (req.socket.remoteAddress || req.ip);
@@ -324,11 +327,12 @@ xhr.send(JSON.stringify(payload));
 </script></body></html>`;
 }
 
-// Bot guard middleware
+// Bot guard middleware — applied per route under the shim mount and on admin preview routes.
 async function botGuard(req, res, next) {
-  // Only protect public page/download routes and custom domain requests
-  const isPageRoute = req.path.startsWith('/page/');
-  // /download/ — skip challenge but still enforce rate limit, blocklist, and bot UA checks
+  // /api/bot-verify owns its own validation flow — skip the guard
+  if (req.path === '/api/bot-verify') return next();
+
+  // /download/* — limited check (no challenge, but blocklist/UA/rate-limit still enforced)
   if (req.path.startsWith('/download/')) {
     const ip = getClientIp(req);
     const ua = req.headers['user-agent'] || '';
@@ -338,24 +342,17 @@ async function botGuard(req, res, next) {
     if (checkRateLimit(ip, 'download')) { logBotBlock(ip, ua, 'Rate limit exceeded (download)', 'rate_limited', req.path, null); return res.status(429).send(blockedPage('Too many requests. Please slow down.')); }
     return next();
   }
-  const host = req.hostname;
-  const isDomainRoute = host !== 'localhost' && host !== '127.0.0.1' &&
-    !req.path.startsWith('/api/') && !req.path.startsWith('/uploads/') &&
-    !req.path.startsWith('/assets/') && !req.path.startsWith('/user') && !req.path.startsWith('/admin') && !req.path.startsWith('/login');
-
-  if (!isPageRoute && !isDomainRoute) return next();
 
   const ip = getClientIp(req);
   const ua = req.headers['user-agent'] || '';
 
   // Resolve page_id early for analytics tracking
   let earlyPageId = null;
-  if (isPageRoute) {
-    const match = req.path.match(/^\/page\/([^/]+)/);
-    if (match) earlyPageId = match[1];
-  } else if (isDomainRoute) {
-    const domRec = await queryOne('SELECT page_id FROM domains WHERE domain = ?', [host]);
-    if (domRec) earlyPageId = domRec.page_id;
+  if (req._shimPageId) {
+    earlyPageId = req._shimPageId;
+  } else {
+    const pageMatch = req.path.match(/^\/page\/([^/]+)/);
+    if (pageMatch) earlyPageId = pageMatch[1];
   }
 
   // 1. IP allowlist
@@ -404,7 +401,7 @@ async function botGuard(req, res, next) {
   return res.status(200).send(challengePageHtml(nonce, originalUrl));
 }
 
-app.use(botGuard);
+// (botGuard is applied per-route below: on the /_shim/proxy mount and on /page/:id / /download/:id.)
 
 // Login brute force guard
 function loginGuard(req, res, next) {
@@ -530,22 +527,18 @@ async function renderPage(page, res) {
   res.send(html);
 }
 
-// Domain-based routing middleware
-app.use(async (req, res, next) => {
-  const host = req.hostname;
-  if (host === 'localhost' || host === '127.0.0.1' || req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/assets/') || req.path.startsWith('/download/') || req.path.startsWith('/page/')) return next();
-
-  const domainRecord = await queryOne('SELECT p.id, p.html_code, p.name, p.status FROM domains d LEFT JOIN pages p ON d.page_id = p.id WHERE d.domain = ?', [host]);
-  if (!domainRecord || !domainRecord.id || !domainRecord.html_code) return next();
-
-  // Windows-only check
+// Shim page render — runs inside the /_shim/proxy mount after shimAuth + botGuard.
+// Looks up the page the deployment was issued for and renders it.
+async function shimPageRoute(req, res, next) {
+  if (!req._shimPageId) return next();
+  const page = await queryOne('SELECT id, html_code, name, status FROM pages WHERE id = ?', [req._shimPageId]);
+  if (!page || !page.html_code) return next();
   if (!isWindows(req.headers['user-agent'])) return res.send(windowsOnlyPage());
-
-  await renderPage(domainRecord, res);
-});
+  await renderPage(page, res);
+}
 
 // ═══════════ BOT VERIFY ═══════════
-app.post('/api/bot-verify', async (req, res) => {
+async function botVerifyHandler(req, res) {
   const { nonce, elapsed, checks, fp, honeypot } = req.body;
   const ip = getClientIp(req);
   const ua = req.headers['user-agent'] || '';
@@ -622,7 +615,9 @@ app.post('/api/bot-verify', async (req, res) => {
   const token = signToken({ ip, exp: Date.now() + CHALLENGE_TOKEN_TTL });
   res.setHeader('Set-Cookie', '_bc_token=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=3600');
   res.json({ ok: true });
-});
+}
+// Registered on the main app for /page/:id admin previews; also mounted under the shim below.
+app.post('/api/bot-verify', botVerifyHandler);
 
 // ═══════════ BOT ADMIN API ═══════════
 app.get('/api/bot-stats', requireAdmin, async (req, res) => {
@@ -1085,6 +1080,140 @@ app.delete('/api/domains/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ═══════════ SHIM DEPLOYMENT PACKAGE ═══════════
+// Deployments are tied to a landing page id. The downloaded index.php embeds the page
+// id and a per-page secret; the user drops it on any host (domain or raw IP, doesn't matter).
+const shimPhpTemplate = fs.readFileSync(path.join(__dirname, 'templates', 'shim', 'index.php'), 'utf8');
+const shimHtaccess = fs.readFileSync(path.join(__dirname, 'templates', 'shim', '.htaccess'), 'utf8');
+
+function buildShimPhp({ centralUrl, pageId, shimSecret }) {
+  return shimPhpTemplate
+    .replace('{{CENTRAL_URL}}',  centralUrl.replace(/'/g, "\\'"))
+    .replace('{{SHIM_PAGE_ID}}', pageId.replace(/'/g, "\\'"))
+    .replace('{{SHIM_SECRET}}',  shimSecret.replace(/'/g, "\\'"));
+}
+
+async function ensurePageShimSecret(page) {
+  if (page.shim_secret) return page.shim_secret;
+  const secret = crypto.randomBytes(32).toString('hex');
+  await runSql('UPDATE pages SET shim_secret = ? WHERE id = ?', [secret, page.id]);
+  return secret;
+}
+
+function centralBaseUrl(req) {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL;
+  const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+  return proto + '://' + req.headers.host;
+}
+
+// Minimal store-format ZIP builder (no compression). Avoids adding a dependency.
+function buildZip(files) {
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+
+  for (const f of files) {
+    const nameBuf = Buffer.from(f.name, 'utf8');
+    const data = Buffer.isBuffer(f.content) ? f.content : Buffer.from(f.content, 'utf8');
+    const crc = zlib.crc32(data);
+    const size = data.length;
+
+    const lfh = Buffer.alloc(30);
+    lfh.writeUInt32LE(0x04034b50, 0);
+    lfh.writeUInt16LE(20, 4);
+    lfh.writeUInt16LE(0, 6);
+    lfh.writeUInt16LE(0, 8);
+    lfh.writeUInt16LE(dosTime, 10);
+    lfh.writeUInt16LE(dosDate, 12);
+    lfh.writeUInt32LE(crc, 14);
+    lfh.writeUInt32LE(size, 18);
+    lfh.writeUInt32LE(size, 22);
+    lfh.writeUInt16LE(nameBuf.length, 26);
+    lfh.writeUInt16LE(0, 28);
+    parts.push(lfh, nameBuf, data);
+
+    const cdh = Buffer.alloc(46);
+    cdh.writeUInt32LE(0x02014b50, 0);
+    cdh.writeUInt16LE(0x031e, 4);
+    cdh.writeUInt16LE(20, 6);
+    cdh.writeUInt16LE(0, 8);
+    cdh.writeUInt16LE(0, 10);
+    cdh.writeUInt16LE(dosTime, 12);
+    cdh.writeUInt16LE(dosDate, 14);
+    cdh.writeUInt32LE(crc, 16);
+    cdh.writeUInt32LE(size, 20);
+    cdh.writeUInt32LE(size, 24);
+    cdh.writeUInt16LE(nameBuf.length, 28);
+    cdh.writeUInt16LE(0, 30);
+    cdh.writeUInt16LE(0, 32);
+    cdh.writeUInt16LE(0, 34);
+    cdh.writeUInt16LE(0, 36);
+    cdh.writeUInt32LE(0, 38);
+    cdh.writeUInt32LE(offset, 42);
+    central.push(cdh, nameBuf);
+
+    offset += lfh.length + nameBuf.length + data.length;
+  }
+
+  const cdSize = central.reduce((s, b) => s + b.length, 0);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(cdSize, 12);
+  eocd.writeUInt32LE(offset, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...parts, ...central, eocd]);
+}
+
+app.get('/api/pages/:id/shim-zip', requireAuth, async (req, res) => {
+  const page = await queryOne('SELECT id, name, shim_secret FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const secret = await ensurePageShimSecret(page);
+  const php = buildShimPhp({ centralUrl: centralBaseUrl(req), pageId: page.id, shimSecret: secret });
+  const zip = buildZip([
+    { name: 'index.php', content: php },
+    { name: '.htaccess', content: shimHtaccess },
+  ]);
+  const filename = crypto.randomBytes(8).toString('hex') + '.zip';
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+  res.send(zip);
+});
+
+app.get('/api/pages/:id/shim-package', requireAuth, async (req, res) => {
+  const page = await queryOne('SELECT id, name, shim_secret FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const secret = await ensurePageShimSecret(page);
+  const php = buildShimPhp({ centralUrl: centralBaseUrl(req), pageId: page.id, shimSecret: secret });
+  res.setHeader('Content-Type', 'application/x-httpd-php');
+  res.setHeader('Content-Disposition', 'attachment; filename="index.php"');
+  res.send(php);
+});
+
+app.get('/api/pages/:id/shim-htaccess', requireAuth, async (req, res) => {
+  const page = await queryOne('SELECT id FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename=".htaccess"');
+  res.send(shimHtaccess);
+});
+
+app.post('/api/pages/:id/rotate-shim-secret', requireAuth, async (req, res) => {
+  const page = await queryOne('SELECT id, name FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const secret = crypto.randomBytes(32).toString('hex');
+  await runSql('UPDATE pages SET shim_secret = ? WHERE id = ?', [secret, page.id]);
+  logActivity('Shim Secret Rotated', 'Rotated shim secret for page: ' + page.name, req.session.user.name);
+  res.json({ ok: true });
+});
+
 app.post('/api/domains/:id/verify-dns', requireAuth, async (req, res) => {
   const dom = await queryOne('SELECT * FROM domains WHERE id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
   if (!dom) return res.status(404).json({ error: 'Domain not found' });
@@ -1204,19 +1333,18 @@ app.get('/api/stats', requireAuth, async (req, res) => {
     const pages = await queryOne('SELECT COUNT(*) as c FROM pages');
     const users = await queryOne('SELECT COUNT(*) as c FROM users');
     const versions = await queryOne('SELECT COUNT(*) as c FROM versions');
-    const domains = await queryOne('SELECT COUNT(*) as c FROM domains');
-    res.json({ pages: pages.c, users: users.c, versions: versions.c, domains: domains.c });
+    const deployments = await queryOne('SELECT COUNT(*) as c FROM pages WHERE shim_secret IS NOT NULL');
+    res.json({ pages: pages.c, users: users.c, versions: versions.c, deployments: deployments.c });
   } else {
     const pages = await queryOne('SELECT COUNT(*) as c FROM pages');
     const versions = await queryOne('SELECT COUNT(*) as c FROM versions');
-    const domains = await queryOne('SELECT COUNT(*) as c FROM domains WHERE user_id = ?', [user.id]);
-    const sslActive = await queryOne('SELECT COUNT(*) as c FROM domains WHERE user_id = ? AND ssl_active = 1', [user.id]);
-    res.json({ pages: pages.c, versions: versions.c, domains: domains.c, sslActive: sslActive.c });
+    const deployments = await queryOne('SELECT COUNT(*) as c FROM pages WHERE shim_secret IS NOT NULL');
+    res.json({ pages: pages.c, versions: versions.c, deployments: deployments.c });
   }
 });
 
 // ═══════════ PUBLIC PAGE RENDERING ═══════════
-app.get('/page/:id', async (req, res) => {
+app.get('/page/:id', botGuard, async (req, res) => {
   const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
   if (!page || !page.html_code) {
     return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;background:#ffffff;color:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;"><h1 style="font-size:1.5rem;color:#1a1a1a;">Page Not Found</h1><p style="color:#6b7280;">This landing page does not exist.</p></div></body></html>');
@@ -1228,7 +1356,7 @@ app.get('/page/:id', async (req, res) => {
   await renderPage(page, res);
 });
 
-app.get('/download/:pageId', async (req, res) => {
+async function downloadHandler(req, res) {
   const activeVersion = await queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [req.params.pageId]);
   if (!activeVersion) return res.status(404).json({ error: 'No active version' });
 
@@ -1243,7 +1371,40 @@ app.get('/download/:pageId', async (req, res) => {
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found on disk' });
 
   res.download(filePath, activeVersion.original_name || activeVersion.file_name);
-});
+}
+app.get('/download/:pageId', botGuard, downloadHandler);
+
+// ═══════════ PHP SHIM MOUNT ═══════════
+// The deployed index.php forwards every visitor request to /_shim/proxy/<original-path>.
+// shimAuth validates the deployment secret against the page it was issued for and sets
+// req._shimPageId / req._shimRealIp; from there the existing antibot + render pipeline
+// runs unchanged. No domain is required — the deployment is anchored to a page id.
+async function shimAuth(req, res, next) {
+  const pageId = (req.headers['x-shim-page'] || '').trim();
+  const key    = req.headers['x-shim-key']  || '';
+  const ip     = req.headers['x-shim-real-ip'] || '';
+  if (!pageId || !key || !ip) return res.status(400).send('shim headers missing');
+
+  const row = await queryOne('SELECT shim_secret FROM pages WHERE id = ?', [pageId]);
+  if (!row || !row.shim_secret) return res.status(403).send('unknown deployment');
+
+  const a = Buffer.from(row.shim_secret);
+  const b = Buffer.from(key);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(403).send('bad key');
+  }
+  req._shimRealIp = ip.startsWith('::ffff:') ? ip.substring(7) : ip;
+  req._shimPageId = pageId;
+  next();
+}
+
+const shimRouter = express.Router();
+shimRouter.use(shimAuth);
+shimRouter.post('/api/bot-verify', botVerifyHandler);
+shimRouter.get('/download/:pageId', botGuard, downloadHandler);
+shimRouter.use(botGuard);
+shimRouter.use(shimPageRoute);
+app.use('/_shim/proxy', shimRouter);
 
 // SPA fallback — only serve React app on the app's own domain
 app.get('*', (req, res) => {
