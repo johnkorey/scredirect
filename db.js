@@ -163,6 +163,11 @@ async function initDb() {
   try { await pool.query("ALTER TABLE users ADD COLUMN telegram_bot_token TEXT"); } catch(e) { /* column exists */ }
   try { await pool.query("ALTER TABLE users ADD COLUMN telegram_chat_id TEXT"); } catch(e) { /* column exists */ }
   try { await pool.query("ALTER TABLE pages ADD COLUMN redirect_url TEXT"); } catch(e) { /* column exists */ }
+  // Pages are shared templates that multiple users each deploy independently (see the
+  // deployments table below) — a visit's "owner" is whoever's deployment served it, not
+  // a property of the page itself. Recorded per-row at log time.
+  try { await pool.query("ALTER TABLE visitor_logs ADD COLUMN user_id TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE bot_blocks ADD COLUMN user_id TEXT"); } catch(e) { /* column exists */ }
 
   // Per-(page, user) shim deployments. Each user that downloads a shim zip gets their
   // own row with their own secret, so visitor traffic to that shim returns that user's

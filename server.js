@@ -315,9 +315,9 @@ function verifyToken(token) {
   } catch { return null; }
 }
 
-function logBotBlock(ip, ua, reason, blockType, reqPath, pageId) {
-  runSql('INSERT INTO bot_blocks (ip, user_agent, reason, block_type, path, page_id, created) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [ip, (ua || '').substring(0, 500), reason, blockType, reqPath || '', pageId || null, new Date().toISOString()]
+function logBotBlock(ip, ua, reason, blockType, reqPath, pageId, userId) {
+  runSql('INSERT INTO bot_blocks (ip, user_agent, reason, block_type, path, page_id, created, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [ip, (ua || '').substring(0, 500), reason, blockType, reqPath || '', pageId || null, new Date().toISOString(), userId || null]
   );
 }
 
@@ -387,9 +387,9 @@ function checkIp2locationBlock(ipData) {
   return reasons.length > 0 ? { blocked: true, reason: reasons.join('; ') } : { blocked: false, reason: null };
 }
 
-function logVisitor(ip, ipData, ua, reqPath, pageId, isBlocked, blockReason) {
+function logVisitor(ip, ipData, ua, reqPath, pageId, isBlocked, blockReason, userId) {
   runSql(
-    'INSERT INTO visitor_logs (ip, country_code, country_name, region_name, city_name, latitude, longitude, isp, domain, usage_type, proxy_flags, user_agent, path, page_id, is_blocked, block_reason, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO visitor_logs (ip, country_code, country_name, region_name, city_name, latitude, longitude, isp, domain, usage_type, proxy_flags, user_agent, path, page_id, is_blocked, block_reason, created, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       ip,
       ipData?.country_code || null, ipData?.country_name || null,
@@ -400,7 +400,8 @@ function logVisitor(ip, ipData, ua, reqPath, pageId, isBlocked, blockReason) {
       ipData?.proxy ? JSON.stringify(ipData.proxy) : null,
       (ua || '').substring(0, 500), reqPath || '', pageId || null,
       isBlocked ? 1 : 0, blockReason || null,
-      new Date().toISOString()
+      new Date().toISOString(),
+      userId || null
     ]
   );
 }
@@ -483,6 +484,9 @@ async function botGuard(req, res, next) {
     const pageMatch = req.path.match(/^\/page\/([^/]+)/);
     if (pageMatch) earlyPageId = pageMatch[1];
   }
+  // Pages are shared templates deployed independently by many users — attribute this
+  // visit to whichever user's deployment is actually serving it, not the page itself.
+  const earlyUserId = effectiveUserForRequest(req);
 
   // 1. IP allowlist
   const allowed = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'allow']);
@@ -491,27 +495,27 @@ async function botGuard(req, res, next) {
   // 2. IP blocklist
   const blocked = await queryOne('SELECT id FROM bot_ip_list WHERE ip = ? AND list_type = ?', [ip, 'block']);
   if (blocked) {
-    logBotBlock(ip, ua, 'IP blocklisted', 'ip_blocklist', req.path, earlyPageId);
+    logBotBlock(ip, ua, 'IP blocklisted', 'ip_blocklist', req.path, earlyPageId, earlyUserId);
     return res.status(403).send(blockedPage('Your IP has been blocked.'));
   }
 
   // 3. Known bot UA
   if (isKnownBot(ua)) {
-    logBotBlock(ip, ua, 'Known bot User-Agent: ' + ua.substring(0, 100), 'ua_blocked', req.path, earlyPageId);
+    logBotBlock(ip, ua, 'Known bot User-Agent: ' + ua.substring(0, 100), 'ua_blocked', req.path, earlyPageId, earlyUserId);
     return res.status(403).send(blockedPage('Automated access is not allowed.'));
   }
 
   // 4. Header anomalies
   const anomaly = hasHeaderAnomalies(req);
   if (anomaly.suspicious) {
-    logBotBlock(ip, ua, anomaly.reason, 'header_anomaly', req.path, earlyPageId);
+    logBotBlock(ip, ua, anomaly.reason, 'header_anomaly', req.path, earlyPageId, earlyUserId);
     return res.status(403).send(blockedPage('Request blocked due to suspicious headers.'));
   }
 
   // 5. Rate limiting
   const routeType = req.path.startsWith('/download/') ? 'download' : 'page';
   if (checkRateLimit(ip, routeType)) {
-    logBotBlock(ip, ua, 'Rate limit exceeded (' + routeType + ')', 'rate_limited', req.path, earlyPageId);
+    logBotBlock(ip, ua, 'Rate limit exceeded (' + routeType + ')', 'rate_limited', req.path, earlyPageId, earlyUserId);
     return res.status(429).send(blockedPage('Too many requests. Please slow down.'));
   }
 
@@ -529,7 +533,7 @@ async function botGuard(req, res, next) {
   // For shim-routed requests, strip the /_shim/proxy mount so the post-verify redirect
   // lands on the visitor-facing URL (e.g. /landing/), not the internal proxy path.
   const visitorUrl = req._shimPageId ? (rawUrl.replace(/^\/_shim\/proxy/, '') || '/') : rawUrl;
-  challengeTokenStore.set(nonce, { ip, originalUrl: visitorUrl, pageId: earlyPageId, expires: Date.now() + 300000 });
+  challengeTokenStore.set(nonce, { ip, originalUrl: visitorUrl, pageId: earlyPageId, userId: earlyUserId, expires: Date.now() + 300000 });
   return res.status(200).send(challengePageHtml(nonce, visitorUrl));
 }
 
@@ -941,17 +945,18 @@ async function botVerifyHandler(req, res) {
   }
   const storedPath = stored.originalUrl || '';
   const storedPageId = stored.pageId || null;
+  const storedUserId = stored.userId || null;
   challengeTokenStore.delete(nonce);
 
   // Check honeypot
   if (honeypot) {
-    logBotBlock(ip, ua, 'Honeypot filled', 'honeypot', storedPath, storedPageId);
+    logBotBlock(ip, ua, 'Honeypot filled', 'honeypot', storedPath, storedPageId, storedUserId);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
   // Check elapsed time
   if (!elapsed || elapsed < CHALLENGE_WAIT_MS) {
-    logBotBlock(ip, ua, 'Challenge completed too fast (' + elapsed + 'ms)', 'challenge_fail', storedPath, storedPageId);
+    logBotBlock(ip, ua, 'Challenge completed too fast (' + elapsed + 'ms)', 'challenge_fail', storedPath, storedPageId, storedUserId);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
@@ -969,7 +974,7 @@ async function botVerifyHandler(req, res) {
 
   if (score >= 30) {
     const flags = Object.entries(checks || {}).filter(([,v]) => v).map(([k]) => k).join(', ');
-    logBotBlock(ip, ua, 'Headless flags: ' + flags + ' (score: ' + score + ')', 'challenge_fail', storedPath, storedPageId);
+    logBotBlock(ip, ua, 'Headless flags: ' + flags + ' (score: ' + score + ')', 'challenge_fail', storedPath, storedPageId, storedUserId);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
@@ -979,25 +984,25 @@ async function botVerifyHandler(req, res) {
 
     if (ipData === null) {
       // No API key configured — still log the visitor
-      logVisitor(ip, null, ua, storedPath, storedPageId, false, null);
+      logVisitor(ip, null, ua, storedPath, storedPageId, false, null, storedUserId);
     } else if (ipData._error) {
       // API failed — fail-closed, block visitor
-      logBotBlock(ip, ua, 'IP lookup unavailable: ' + ipData._message, 'ip2location', storedPath, storedPageId);
-      logVisitor(ip, null, ua, storedPath, storedPageId, true, 'IP lookup unavailable');
+      logBotBlock(ip, ua, 'IP lookup unavailable: ' + ipData._message, 'ip2location', storedPath, storedPageId, storedUserId);
+      logVisitor(ip, null, ua, storedPath, storedPageId, true, 'IP lookup unavailable', storedUserId);
       return res.status(403).json({ ok: false, reason: 'Verification failed' });
     } else {
       const ipCheck = checkIp2locationBlock(ipData);
       if (ipCheck.blocked) {
-        logVisitor(ip, ipData, ua, storedPath, storedPageId, true, ipCheck.reason);
-        logBotBlock(ip, ua, ipCheck.reason, 'ip2location', storedPath, storedPageId);
+        logVisitor(ip, ipData, ua, storedPath, storedPageId, true, ipCheck.reason, storedUserId);
+        logBotBlock(ip, ua, ipCheck.reason, 'ip2location', storedPath, storedPageId, storedUserId);
         return res.status(403).json({ ok: false, reason: 'Verification failed' });
       }
       // Clean visitor — log it
-      logVisitor(ip, ipData, ua, storedPath, storedPageId, false, null);
+      logVisitor(ip, ipData, ua, storedPath, storedPageId, false, null, storedUserId);
     }
   } catch (err) {
     // Fail-closed on unexpected error
-    logBotBlock(ip, ua, 'IP lookup error: ' + err.message, 'ip2location', storedPath, storedPageId);
+    logBotBlock(ip, ua, 'IP lookup error: ' + err.message, 'ip2location', storedPath, storedPageId, storedUserId);
     return res.status(403).json({ ok: false, reason: 'Verification failed' });
   }
 
@@ -1096,15 +1101,12 @@ app.get('/api/visitor-logs', requireAdmin, async (req, res) => {
   const totalRow = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs vl ' + whereClause, params) || { c: 0 };
   paramIdx++;
   paramIdx++;
-  // Owner resolution: prefer the page's directly-assigned user_id; fall back to whoever
-  // registered a custom domain pointing at this page_id, since older/unassigned pages
-  // often only have ownership recorded there.
+  // Owner = whichever user's deployment served this specific visit (visitor_logs.user_id,
+  // recorded at log time). Pages are shared templates multiple users deploy independently,
+  // so ownership lives on the visit, not on the page.
   const logs = await rawQueryAll(
-    'SELECT vl.*, COALESCE(u.name, u2.name) AS owner_name, COALESCE(u.email, u2.email) AS owner_email FROM visitor_logs vl ' +
-    'LEFT JOIN pages p ON p.id = vl.page_id ' +
-    'LEFT JOIN users u ON u.id = p.user_id ' +
-    'LEFT JOIN (SELECT DISTINCT ON (page_id) page_id, user_id FROM domains WHERE page_id IS NOT NULL ORDER BY page_id, created DESC) d ON d.page_id = vl.page_id ' +
-    'LEFT JOIN users u2 ON u2.id = d.user_id ' +
+    'SELECT vl.*, u.name AS owner_name, u.email AS owner_email FROM visitor_logs vl ' +
+    'LEFT JOIN users u ON u.id = vl.user_id ' +
     whereClause + ' ORDER BY vl.id DESC LIMIT $' + (paramIdx - 1) + ' OFFSET $' + paramIdx,
     [...params, limit, offset]
   );
@@ -1119,41 +1121,28 @@ app.delete('/api/visitor-logs', requireAdmin, async (req, res) => {
 
 // ═══════════ USER ANALYTICS ═══════════
 app.get('/api/my-analytics', requireAuth, async (req, res) => {
-  // Page IDs the user owns: their own pages, plus any pages reachable via a custom domain
-  // they registered (domains.page_id can point at a page even when pages.user_id differs,
-  // e.g. shared/legacy setups) — union both so nothing is silently dropped.
-  const ownPages = await queryAll('SELECT id AS page_id FROM pages WHERE user_id = ?', [req.session.user.id]);
-  const domains = await queryAll('SELECT page_id FROM domains WHERE user_id = ? AND page_id IS NOT NULL', [req.session.user.id]);
-  const pageIds = [...new Set([...ownPages, ...domains].map(d => d.page_id).filter(Boolean))];
-  if (pageIds.length === 0) return res.json({ total: 0, uniqueIps: 0, today: 0, botsBlocked: 0, topCountries: [], topCities: [], topIsps: [] });
-
-  const placeholders = pageIds.map((_, i) => '$' + (i + 1)).join(',');
-  const total = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND page_id IN (' + placeholders + ')', pageIds) || { c: 0 };
-  const uniqueIps = await rawQueryOne('SELECT COUNT(DISTINCT ip) as c FROM visitor_logs WHERE is_blocked = 0 AND page_id IN (' + placeholders + ')', pageIds) || { c: 0 };
+  // Pages are shared templates multiple users deploy independently — a visit belongs to
+  // whichever user's deployment served it (visitor_logs.user_id), not to the page itself.
+  const uid_ = req.session.user.id;
+  const total = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND user_id = ?', [uid_]) || { c: 0 };
+  const uniqueIps = await queryOne('SELECT COUNT(DISTINCT ip) as c FROM visitor_logs WHERE is_blocked = 0 AND user_id = ?', [uid_]) || { c: 0 };
   const todayStr = today();
-  const todayParams = [todayStr + '%', ...pageIds];
-  const todayCount = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND created LIKE $1 AND page_id IN (' + pageIds.map((_, i) => '$' + (i + 2)).join(',') + ')', todayParams) || { c: 0 };
-  const topCountries = await rawQueryAll('SELECT country_code, country_name, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND country_code IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY country_code, country_name ORDER BY count DESC LIMIT 10', pageIds);
-  const topCities = await rawQueryAll('SELECT city_name, country_code, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND city_name IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY city_name, country_code ORDER BY count DESC LIMIT 10', pageIds);
-  const topIsps = await rawQueryAll('SELECT isp, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND isp IS NOT NULL AND page_id IN (' + placeholders + ') GROUP BY isp ORDER BY count DESC LIMIT 10', pageIds);
-  const botsBlocked = await rawQueryOne('SELECT COUNT(*) as c FROM bot_blocks WHERE page_id IN (' + placeholders + ')', pageIds) || { c: 0 };
+  const todayCount = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND created LIKE ? AND user_id = ?', [todayStr + '%', uid_]) || { c: 0 };
+  const topCountries = await queryAll('SELECT country_code, country_name, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND country_code IS NOT NULL AND user_id = ? GROUP BY country_code, country_name ORDER BY count DESC LIMIT 10', [uid_]);
+  const topCities = await queryAll('SELECT city_name, country_code, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND city_name IS NOT NULL AND user_id = ? GROUP BY city_name, country_code ORDER BY count DESC LIMIT 10', [uid_]);
+  const topIsps = await queryAll('SELECT isp, COUNT(*) as count FROM visitor_logs WHERE is_blocked = 0 AND isp IS NOT NULL AND user_id = ? GROUP BY isp ORDER BY count DESC LIMIT 10', [uid_]);
+  const botsBlocked = await queryOne('SELECT COUNT(*) as c FROM bot_blocks WHERE user_id = ?', [uid_]) || { c: 0 };
   res.json({ total: total.c, uniqueIps: uniqueIps.c, today: todayCount.c, botsBlocked: botsBlocked.c, topCountries, topCities, topIsps });
 });
 
 app.get('/api/my-visitor-logs', requireAuth, async (req, res) => {
-  const ownPages = await queryAll('SELECT id AS page_id FROM pages WHERE user_id = ?', [req.session.user.id]);
-  const domains = await queryAll('SELECT page_id FROM domains WHERE user_id = ? AND page_id IS NOT NULL', [req.session.user.id]);
-  const pageIds = [...new Set([...ownPages, ...domains].map(d => d.page_id).filter(Boolean))];
-  if (pageIds.length === 0) return res.json({ logs: [], total: 0, page: 1 });
-
+  const uid_ = req.session.user.id;
   const page = parseInt(req.query.page) || 1;
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = (page - 1) * limit;
 
-  const placeholders = pageIds.map((_, i) => '$' + (i + 1)).join(',');
-  const total = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND page_id IN (' + placeholders + ')', pageIds) || { c: 0 };
-  const allParams = [...pageIds, limit, offset];
-  const logs = await rawQueryAll('SELECT * FROM visitor_logs WHERE is_blocked = 0 AND page_id IN (' + placeholders + ') ORDER BY id DESC LIMIT $' + (pageIds.length + 1) + ' OFFSET $' + (pageIds.length + 2), allParams);
+  const total = await queryOne('SELECT COUNT(*) as c FROM visitor_logs WHERE is_blocked = 0 AND user_id = ?', [uid_]) || { c: 0 };
+  const logs = await rawQueryAll('SELECT * FROM visitor_logs WHERE is_blocked = 0 AND user_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3', [uid_, limit, offset]);
   res.json({ logs, total: total.c, page });
 });
 
