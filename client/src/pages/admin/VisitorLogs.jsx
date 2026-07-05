@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../api';
 import { useToast } from '../../components/Toast';
+import { parseBrowser } from '../../utils/browser';
 
 export default function VisitorLogs() {
   const toast = useToast();
@@ -146,7 +147,7 @@ export default function VisitorLogs() {
                   {logs.map(v => (
                     <tr key={v.id}>
                       <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.82rem' }}>{v.ip}</td>
-                      <td style={{ color: '#94a3b8', fontSize: '0.78rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.user_agent || ''}>{v.user_agent || '-'}</td>
+                      <td style={{ color: '#94a3b8', fontSize: '0.82rem' }} title={v.user_agent || ''}>{parseBrowser(v.user_agent)}</td>
                       <td><span style={{ fontWeight: 600 }}>{v.country_code || '-'}</span> <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}>{v.country_name || ''}</span></td>
                       <td style={{ color: '#94a3b8', fontSize: '0.82rem' }}>{v.city_name || '-'}</td>
                       <td style={{ color: '#94a3b8', fontSize: '0.82rem', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.isp}>{v.isp || '-'}</td>

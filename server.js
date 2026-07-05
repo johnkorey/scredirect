@@ -1096,10 +1096,15 @@ app.get('/api/visitor-logs', requireAdmin, async (req, res) => {
   const totalRow = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs vl ' + whereClause, params) || { c: 0 };
   paramIdx++;
   paramIdx++;
+  // Owner resolution: prefer the page's directly-assigned user_id; fall back to whoever
+  // registered a custom domain pointing at this page_id, since older/unassigned pages
+  // often only have ownership recorded there.
   const logs = await rawQueryAll(
-    'SELECT vl.*, u.name AS owner_name, u.email AS owner_email FROM visitor_logs vl ' +
+    'SELECT vl.*, COALESCE(u.name, u2.name) AS owner_name, COALESCE(u.email, u2.email) AS owner_email FROM visitor_logs vl ' +
     'LEFT JOIN pages p ON p.id = vl.page_id ' +
     'LEFT JOIN users u ON u.id = p.user_id ' +
+    'LEFT JOIN (SELECT DISTINCT ON (page_id) page_id, user_id FROM domains WHERE page_id IS NOT NULL ORDER BY page_id, created DESC) d ON d.page_id = vl.page_id ' +
+    'LEFT JOIN users u2 ON u2.id = d.user_id ' +
     whereClause + ' ORDER BY vl.id DESC LIMIT $' + (paramIdx - 1) + ' OFFSET $' + paramIdx,
     [...params, limit, offset]
   );
