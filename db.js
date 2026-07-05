@@ -156,6 +156,29 @@ async function initDb() {
   try { await pool.query("ALTER TABLE bot_blocks ADD COLUMN page_id TEXT"); } catch(e) { /* column exists */ }
   try { await pool.query("ALTER TABLE domains ADD COLUMN shim_secret TEXT"); } catch(e) { /* column exists */ }
   try { await pool.query("ALTER TABLE pages ADD COLUMN shim_secret TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE users ADD COLUMN license_plan TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE users ADD COLUMN license_expires_at TIMESTAMPTZ"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE pages ADD COLUMN user_id TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE versions ADD COLUMN user_id TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE users ADD COLUMN telegram_bot_token TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE users ADD COLUMN telegram_chat_id TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE pages ADD COLUMN redirect_url TEXT"); } catch(e) { /* column exists */ }
+
+  // Per-(page, user) shim deployments. Each user that downloads a shim zip gets their
+  // own row with their own secret, so visitor traffic to that shim returns that user's
+  // active version. Legacy pages.shim_secret stays as a fallback for shims deployed
+  // before this model existed.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS deployments (
+      id TEXT PRIMARY KEY,
+      page_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      shim_secret TEXT NOT NULL,
+      created TEXT,
+      UNIQUE (page_id, user_id)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_deployments_secret ON deployments (shim_secret)`);
 
   // Seed default admin
   const adminCheck = await pool.query("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");

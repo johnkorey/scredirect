@@ -6,12 +6,12 @@ import { useAuth } from '../../AuthContext';
 export default function Settings() {
   const toast = useToast();
   const { user } = useAuth();
-  const [settings, setSettings] = useState({ siteName: 'SC Landing Pages', siteUrl: '' });
+  const [settings, setSettings] = useState({ siteName: 'SC Landing Pages', siteUrl: window.location.origin });
   const [profileForm, setProfileForm] = useState({ name: '', email: '', password: '' });
 
   useEffect(() => {
     api.getSettings().then(s => {
-      setSettings(prev => ({ ...prev, ...s }));
+      setSettings(prev => ({ ...prev, ...s, siteUrl: s.siteUrl || window.location.origin }));
     }).catch(() => {});
     if (user) {
       setProfileForm({ name: user.name, email: user.email, password: '' });
@@ -32,6 +32,14 @@ export default function Settings() {
       if (profileForm.password) data.password = profileForm.password;
       await api.updateUser(user.id, data);
       toast('Profile updated. Changes take effect on next login.');
+    } catch (err) { toast(err.message); }
+  }
+
+  async function testTelegram() {
+    try {
+      await api.updateSettings({ telegram_bot_token: settings.telegram_bot_token || '', telegram_chat_id: settings.telegram_chat_id || '' });
+      await api.testAdminTelegram();
+      toast('Test sent — check your Telegram chat.');
     } catch (err) { toast(err.message); }
   }
 
@@ -56,7 +64,26 @@ export default function Settings() {
             <input className="form-input" type="password" value={settings.ip2location_api_key || ''} onChange={e => setSettings({ ...settings, ip2location_api_key: e.target.value })} placeholder="Enter your IP2Location.io API key" />
             <small style={{ color: '#475569', fontSize: '0.72rem' }}>Used for VPN/proxy/datacenter detection on landing page visitors.</small>
           </div>
-          <button className="btn btn-primary" onClick={saveSettings}>Save Settings</button>
+
+          <hr style={{ border: 0, borderTop: '1px solid #1e2230', margin: '18px 0' }} />
+          <h4 style={{ marginTop: 0, marginBottom: 4, fontSize: '0.95rem' }}>Telegram alerts (global)</h4>
+          <p style={{ color: '#94a3b8', fontSize: '0.78rem', marginTop: 0, marginBottom: 12 }}>
+            Every download across the system is mirrored to this channel. Individual users can also configure their own Telegram from their dashboard — they get a private copy of their own page downloads in addition to this global feed.
+          </p>
+          <div className="form-group">
+            <label>Bot Token</label>
+            <input className="form-input" type="password" value={settings.telegram_bot_token || ''} onChange={e => setSettings({ ...settings, telegram_bot_token: e.target.value })} placeholder="123456789:AAH…" autoComplete="new-password" />
+            <small style={{ color: '#475569', fontSize: '0.72rem' }}>Create a bot in Telegram via <code>@BotFather</code> → <code>/newbot</code>. It hands you a token.</small>
+          </div>
+          <div className="form-group">
+            <label>Chat ID</label>
+            <input className="form-input" value={settings.telegram_chat_id || ''} onChange={e => setSettings({ ...settings, telegram_chat_id: e.target.value })} placeholder="e.g. 123456789 or -1001234567890" />
+            <small style={{ color: '#475569', fontSize: '0.72rem' }}>For a personal chat: open <code>@userinfobot</code> in Telegram and start it — it replies with your numeric ID. For a group: add the bot to the group, then visit <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>.</small>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary" onClick={saveSettings}>Save Settings</button>
+            <button className="btn btn-outline" onClick={testTelegram}>Save & Send Test</button>
+          </div>
         </div>
 
         <div className="section-card">

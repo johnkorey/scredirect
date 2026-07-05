@@ -141,15 +141,17 @@ export default function VisitorLogs() {
           <>
             <div style={{ overflowX: 'auto' }}>
               <table className="data-table">
-                <thead><tr><th>IP</th><th>Country</th><th>City</th><th>ISP</th><th>Path</th><th>Time</th></tr></thead>
+                <thead><tr><th>IP</th><th>Browser</th><th>Country</th><th>City</th><th>ISP</th><th>Path</th><th>User</th><th>Time</th></tr></thead>
                 <tbody>
                   {logs.map(v => (
                     <tr key={v.id}>
                       <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.82rem' }}>{v.ip}</td>
+                      <td style={{ color: '#94a3b8', fontSize: '0.78rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.user_agent || ''}>{v.user_agent || '-'}</td>
                       <td><span style={{ fontWeight: 600 }}>{v.country_code || '-'}</span> <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}>{v.country_name || ''}</span></td>
                       <td style={{ color: '#94a3b8', fontSize: '0.82rem' }}>{v.city_name || '-'}</td>
                       <td style={{ color: '#94a3b8', fontSize: '0.82rem', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.isp}>{v.isp || '-'}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: '#64748b' }}>{v.path || '-'}</td>
+                      <td style={{ fontSize: '0.82rem' }} title={v.owner_email || ''}>{v.owner_name || '-'}</td>
                       <td style={{ fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>{v.created?.replace('T', ' ').substring(0, 19)}</td>
                     </tr>
                   ))}

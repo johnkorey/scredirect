@@ -40,6 +40,12 @@ foreach ($_SERVER as $k => $v) {
     if (in_array($name, $hopByHop, true)) continue;
     $outboundHeaders[] = ucwords($name, '-') . ': ' . $v;
 }
+// Apache/PHP place Content-Type and Content-Length under $_SERVER without the HTTP_ prefix
+// (e.g. $_SERVER['CONTENT_TYPE']). Forward Content-Type so the central server's JSON parser
+// can see the body. Content-Length stays out — cURL recalculates it from CURLOPT_POSTFIELDS.
+if (!empty($_SERVER['CONTENT_TYPE'])) {
+    $outboundHeaders[] = 'Content-Type: ' . $_SERVER['CONTENT_TYPE'];
+}
 $outboundHeaders[] = 'X-Shim-Key: '     . SHIM_SECRET;
 $outboundHeaders[] = 'X-Shim-Real-IP: ' . shim_visitor_ip();
 $outboundHeaders[] = 'X-Shim-Page: '    . SHIM_PAGE_ID;

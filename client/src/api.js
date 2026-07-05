@@ -26,22 +26,34 @@ const api = {
   createUser: (data) => request('POST', '/api/users', data),
   updateUser: (id, data) => request('PUT', '/api/users/' + id, data),
   deleteUser: (id) => request('DELETE', '/api/users/' + id),
+  setUserLicense: (id, body) => request('POST', '/api/users/' + id + '/license', body),
 
   getPages: () => request('GET', '/api/pages'),
   createPage: (data) => request('POST', '/api/pages', data),
   updatePage: (id, data) => request('PUT', '/api/pages/' + id, data),
   deletePage: (id) => request('DELETE', '/api/pages/' + id),
 
-  uploadFile: (pageId, file) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    return request('POST', '/api/pages/' + pageId + '/upload', fd, true);
+  uploadFile: (pageId, formData, onProgress) => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/pages/' + pageId + '/upload');
+      xhr.withCredentials = true;
+      if (onProgress) xhr.upload.onprogress = onProgress;
+      xhr.onload = () => {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status >= 400) reject(new Error(data.error || 'Upload failed'));
+        else resolve(data);
+      };
+      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.send(formData);
+    });
   },
   addLink: (pageId, data) => request('POST', '/api/pages/' + pageId + '/link', data),
   activateVersion: (id) => request('PUT', '/api/versions/' + id + '/activate'),
   deleteVersion: (id) => request('DELETE', '/api/versions/' + id),
 
   rotatePageShimSecret: (pageId) => request('POST', '/api/pages/' + pageId + '/rotate-shim-secret'),
+  getMyDeployment: (pageId) => request('GET', '/api/pages/' + pageId + '/my-deployment'),
   shimZipUrl: (pageId) => '/api/pages/' + pageId + '/shim-zip',
 
   getLinks: () => request('GET', '/api/links'),
@@ -73,6 +85,11 @@ const api = {
   getActivity: () => request('GET', '/api/activity'),
   getSettings: () => request('GET', '/api/settings'),
   updateSettings: (data) => request('PUT', '/api/settings', data),
+  testAdminTelegram: () => request('POST', '/api/settings/telegram-test'),
+
+  getMyTelegram: () => request('GET', '/api/me/telegram'),
+  updateMyTelegram: (data) => request('PUT', '/api/me/telegram', data),
+  testMyTelegram: () => request('POST', '/api/me/telegram/test'),
 };
 
 export default api;

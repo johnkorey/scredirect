@@ -1,6 +1,51 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
+
+function formatCountdown(ms) {
+  if (ms == null || ms <= 0) return null;
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+  if (h > 0) return h + 'h ' + m + 'm';
+  return m + 'm';
+}
+
+function LicenseBanner({ license }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!license || !license.expires_at) return;
+    const id = setInterval(() => force(n => n + 1), 30000);
+    return () => clearInterval(id);
+  }, [license && license.expires_at]);
+  if (!license) return null;
+  const remaining = license.expires_at ? new Date(license.expires_at).getTime() - Date.now() : null;
+  const active = license.active && remaining != null && remaining > 0;
+  const warning = active && remaining < 86400000;
+  if (active && !warning) {
+    return (
+      <div className="license-banner license-banner-ok" style={{ background: '#ecfdf5', color: '#065f46', borderBottom: '1px solid #a7f3d0', padding: '8px 16px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>Your <strong>{license.plan}</strong> license is active — expires in <strong>{formatCountdown(remaining)}</strong></span>
+        <span style={{ opacity: 0.6 }}>{new Date(license.expires_at).toLocaleString()}</span>
+      </div>
+    );
+  }
+  if (warning) {
+    return (
+      <div className="license-banner license-banner-warn" style={{ background: '#fffbeb', color: '#92400e', borderBottom: '1px solid #fcd34d', padding: '8px 16px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>Your <strong>{license.plan}</strong> license expires in <strong>{formatCountdown(remaining)}</strong> — contact your admin to renew.</span>
+        <span style={{ opacity: 0.6 }}>{new Date(license.expires_at).toLocaleString()}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="license-banner license-banner-expired" style={{ background: '#fef2f2', color: '#991b1b', borderBottom: '1px solid #fecaca', padding: '8px 16px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <span><strong>Your license has expired.</strong> Your landing pages are not serving visitors. Contact your admin to subscribe.</span>
+    </div>
+  );
+}
 
 const adminNav = [
   { to: '/admin', label: 'Dashboard', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' },
@@ -52,7 +97,10 @@ export default function Layout({ children }) {
           <button className="logout-btn" onClick={logout}>Sign Out</button>
         </div>
       </aside>
-      <main className="main">{children}</main>
+      <main className="main">
+        {!isAdmin && user?.license && <LicenseBanner license={user.license} />}
+        {children}
+      </main>
     </div>
   );
 }

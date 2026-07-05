@@ -1,20 +1,30 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import api from '../../api';
 import Modal from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 
 export default function Files() {
   const toast = useToast();
-  const fileRef = useRef();
   const [pages, setPages] = useState([]);
   const [selectedPage, setSelectedPage] = useState('');
-  const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
-  const [tab, setTab] = useState('file');
   const [linkUrl, setLinkUrl] = useState('');
   const [linkNotes, setLinkNotes] = useState('');
+  const [addMode, setAddMode] = useState('link'); // 'link' | 'file'
   const [addingLink, setAddingLink] = useState(false);
+  const [uploadFileObj, setUploadFileObj] = useState(null);
+  const [uploadNotes, setUploadNotes] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [deployModal, setDeployModal] = useState(false);
+  const [previewModal, setPreviewModal] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState('desktop');
+  const [deployment, setDeployment] = useState(null);
+
+  useEffect(() => {
+    if (!deployModal || !selectedPage) { setDeployment(null); return; }
+    api.getMyDeployment(selectedPage).then(setDeployment).catch(() => setDeployment(null));
+  }, [deployModal, selectedPage]);
 
   async function rotate() {
     if (!selectedPage) return;
@@ -37,26 +47,6 @@ export default function Files() {
   const versions = page?.versions || [];
   const activeV = versions.find(v => v.active);
 
-  async function handleUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file || !selectedPage) return;
-
-    setUploading(true);
-    setUploadMsg('Uploading "' + file.name + '"...');
-    try {
-      const result = await api.uploadFile(selectedPage, file);
-      setUploadMsg('"' + file.name + '" uploaded as v' + result.version + ' and activated!');
-      toast('File uploaded & activated as v' + result.version);
-      load();
-    } catch (err) {
-      setUploadMsg('Error: ' + err.message);
-      toast(err.message);
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  }
-
   async function handleAddLink() {
     if (!linkUrl.trim()) { toast('Please enter a URL'); return; }
     if (!selectedPage) { toast('No page selected'); return; }
@@ -75,6 +65,30 @@ export default function Files() {
       toast(err.message);
     } finally {
       setAddingLink(false);
+    }
+  }
+
+  async function handleUploadFile() {
+    if (!uploadFileObj) { toast('Select a file first'); return; }
+    if (!selectedPage) { toast('No page selected'); return; }
+    const fd = new FormData();
+    fd.append('file', uploadFileObj);
+    fd.append('notes', uploadNotes.trim());
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const result = await api.uploadFile(selectedPage, fd, e => {
+        if (e.lengthComputable) setUploadProgress(Math.round(e.loaded / e.total * 100));
+      });
+      toast('Uploaded as v' + result.version + ' and activated!');
+      setUploadFileObj(null);
+      setUploadNotes('');
+      setUploadProgress(0);
+      load();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -107,37 +121,71 @@ export default function Files() {
           </select>
           <span className="badge badge-green">{activeV ? 'Active: v' + activeV.version : 'No active version'}</span>
           {selectedPage && (
-            <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setDeployModal(true)}>Deploy to a host</button>
+            <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+              <button className="btn btn-outline btn-sm" onClick={() => { setPreviewDevice('desktop'); setPreviewModal(true); }}>Preview</button>
+              <button className="btn btn-primary btn-sm" onClick={() => setDeployModal(true)}>Deploy to a host</button>
+            </div>
           )}
         </div>
       </div>
 
       <div className="section-card">
         <h3>Add Version</h3>
-        <p className="desc">Upload a file or add an external link. It will automatically become the active version.</p>
+        <p className="desc">Upload a file directly or add an external download link. It will automatically become the active version.</p>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <button
-            className={'btn btn-sm' + (tab === 'file' ? '' : ' btn-outline')}
-            style={tab === 'file' ? { background: '#818cf8', color: '#fff' } : {}}
-            onClick={() => setTab('file')}
-          >
-            Upload File
-          </button>
-          <button
-            className={'btn btn-sm' + (tab === 'link' ? '' : ' btn-outline')}
-            style={tab === 'link' ? { background: '#818cf8', color: '#fff' } : {}}
-            onClick={() => setTab('link')}
-          >
-            External Link
-          </button>
+        <div style={{ display: 'flex', gap: 0, marginBottom: 18, borderBottom: '1px solid #1e2230' }}>
+          {[['file', 'Upload File'], ['link', 'External Link']].map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() => setAddMode(mode)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '8px 18px',
+                fontSize: '0.85rem', fontWeight: addMode === mode ? 600 : 400,
+                color: addMode === mode ? '#60a5fa' : '#94a3b8',
+                borderBottom: addMode === mode ? '2px solid #60a5fa' : '2px solid transparent',
+                marginBottom: -1,
+              }}
+            >{label}</button>
+          ))}
         </div>
 
-        {tab === 'file' ? (
-          <div className="upload-area" onClick={() => fileRef.current?.click()}>
-            <input type="file" ref={fileRef} onChange={handleUpload} />
-            <div className="upload-icon">&#8682;</div>
-            <p>{uploading ? 'Uploading...' : 'Click to select a file'}</p>
+        {addMode === 'file' ? (
+          <div>
+            <div className="form-group">
+              <label>File</label>
+              <input
+                className="form-input"
+                type="file"
+                onChange={e => setUploadFileObj(e.target.files[0] || null)}
+              />
+              {uploadFileObj && (
+                <span style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 4, display: 'block' }}>
+                  {uploadFileObj.name} ({(uploadFileObj.size / 1024 / 1024).toFixed(1)} MB)
+                </span>
+              )}
+            </div>
+            <div className="form-group">
+              <label>Notes (optional)</label>
+              <input
+                className="form-input"
+                value={uploadNotes}
+                onChange={e => setUploadNotes(e.target.value)}
+                placeholder="e.g. v2.1.0 release"
+              />
+            </div>
+            {uploading && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#94a3b8', marginBottom: 4 }}>
+                  <span>Uploading…</span><span>{uploadProgress}%</span>
+                </div>
+                <div style={{ height: 6, background: '#1e2230', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: uploadProgress + '%', background: '#3b82f6', borderRadius: 3, transition: 'width 0.2s' }} />
+                </div>
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={handleUploadFile} disabled={uploading || !uploadFileObj}>
+              {uploading ? 'Uploading…' : 'Upload File'}
+            </button>
           </div>
         ) : (
           <div>
@@ -228,6 +276,28 @@ export default function Files() {
             <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: 14 }}>
               Drop the two files below into the document root of any host (cPanel domain, subdomain, or a server reachable by IP). No DNS setup on this side is required.
             </p>
+
+            {deployment && (
+              <div style={{ marginBottom: 14, padding: 12, background: '#0a1a0e', borderRadius: 8, border: '1px solid #134e1e', fontSize: '0.82rem', lineHeight: 1.6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ color: '#86efac', fontWeight: 600, marginBottom: 2 }}>This deployment is uniquely yours</div>
+                    <div style={{ color: '#94a3b8' }}>Logged in as <strong style={{ color: '#cbd5e1' }}>{deployment.user_name}</strong>. Only YOUR active version will be served from this zip — no other user's content can leak.</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: '#64748b', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Fingerprint</div>
+                    <div style={{ color: '#fbbf24', fontFamily: 'Consolas, monospace', fontWeight: 700, fontSize: '1.1rem' }}>{deployment.fingerprint}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {deployment && !deployment.has_active_version && (
+              <div style={{ marginBottom: 14, padding: 12, background: '#1a1206', borderRadius: 8, border: '1px solid #3a2406', color: '#fbbf24', fontSize: '0.82rem', lineHeight: 1.6 }}>
+                <strong>⚠ You have no active version for this page.</strong> If you deploy this zip now, visitors will see the page but the download will fail. Add a link in the "Add Version" form above before deploying.
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
               <a className="btn btn-primary" href={api.shimZipUrl(page.id)} download>Download deployment (.zip)</a>
             </div>
@@ -248,6 +318,42 @@ export default function Files() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title={page ? 'Preview: ' + page.name : 'Preview'}
+        show={previewModal}
+        onClose={() => setPreviewModal(false)}
+        footer={<>
+          <div style={{ display: 'flex', gap: 8, marginRight: 'auto' }}>
+            <button className={'btn btn-sm ' + (previewDevice === 'desktop' ? 'btn-primary' : 'btn-outline')} onClick={() => setPreviewDevice('desktop')}>Desktop</button>
+            <button className={'btn btn-sm ' + (previewDevice === 'tablet' ? 'btn-primary' : 'btn-outline')} onClick={() => setPreviewDevice('tablet')}>Tablet</button>
+            <button className={'btn btn-sm ' + (previewDevice === 'mobile' ? 'btn-primary' : 'btn-outline')} onClick={() => setPreviewDevice('mobile')}>Mobile</button>
+          </div>
+          {page && <a className="btn btn-outline btn-sm" href={'/page/' + page.id} target="_blank" rel="noopener">Open in new tab</a>}
+          <button className="btn btn-primary" onClick={() => setPreviewModal(false)}>Close</button>
+        </>}
+      >
+        {page && (
+          <div style={{ background: '#0f1117', padding: 12, borderRadius: 8, display: 'flex', justifyContent: 'center' }}>
+            <iframe
+              key={page.id + previewDevice}
+              src={'/page/' + page.id + '?_t=' + Date.now()}
+              title="Landing page preview"
+              style={{
+                width: previewDevice === 'desktop' ? '100%' : previewDevice === 'tablet' ? 768 : 390,
+                height: 640,
+                border: '1px solid #1e2230',
+                borderRadius: 4,
+                background: '#fff',
+                maxWidth: '100%'
+              }}
+            />
+          </div>
+        )}
+        <p style={{ marginTop: 10, fontSize: '0.75rem', color: '#64748b' }}>
+          This is the exact HTML visitors see after passing antibot. Bot challenge and Windows-only gate are skipped for in-dashboard previews.
+        </p>
       </Modal>
     </div>
   );
