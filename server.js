@@ -332,7 +332,7 @@ function blockedPage(reason) {
 }
 
 // ═══════════ IP2LOCATION ═══════════
-const BLOCKED_USAGE_TYPES = new Set(['DCH', 'SES', 'RSV', 'CDN']);
+const BLOCKED_USAGE_TYPES = new Set(['DCH', 'SES', 'RSV', 'CDN', 'AIC']);
 
 function ip2locationLookup(ip) {
   return new Promise(async (resolve) => {
