@@ -9,3 +9,4 @@ client/dist/
 *.exe
 server.log
 server.err.log
+.claude/settings.local.json
