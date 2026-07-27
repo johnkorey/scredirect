@@ -12,6 +12,7 @@ export default function LandingPages() {
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ name: '', htmlCode: '', status: 'active', user_id: '', redirect_url: '' });
   const [deployPage, setDeployPage] = useState(null);
+  const [downloading, setDownloading] = useState(false);
   const [previewPage, setPreviewPage] = useState(null);
   const [previewDevice, setPreviewDevice] = useState('desktop');
 
@@ -56,6 +57,16 @@ export default function LandingPages() {
       toast('Page deleted');
       load();
     } catch (err) { toast(err.message); }
+  }
+
+  async function downloadZip() {
+    if (!deployPage || downloading) return;
+    setDownloading(true);
+    try {
+      const name = await api.downloadShimZip(deployPage.id);
+      toast('Download started: ' + name + ' — check your Downloads folder.');
+    } catch (err) { toast(err.message); }
+    finally { setDownloading(false); }
   }
 
   async function rotate(pageId) {
@@ -176,7 +187,9 @@ export default function LandingPages() {
               Download both files and upload them to the document root of any host that should serve this page — a cPanel domain, a subdomain, or a server you can reach by IP. No DNS configuration on this side is required.
             </p>
             <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-              <a className="btn btn-primary" href={api.shimZipUrl(deployPage.id)} download>Download deployment (.zip)</a>
+              <button className="btn btn-primary" onClick={downloadZip} disabled={downloading}>
+                {downloading ? 'Downloading…' : 'Download deployment (.zip)'}
+              </button>
             </div>
             <div style={{ padding: 14, background: '#0f1117', borderRadius: 8, border: '1px solid #1e2230', color: '#94a3b8', fontSize: '0.82rem', lineHeight: 1.7 }}>
               <strong style={{ color: '#f1f5f9' }}>Setup</strong>

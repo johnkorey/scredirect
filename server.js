@@ -232,9 +232,12 @@ const BOT_UA_PATTERNS = [
 function getClientIp(req) {
   // PHP shim already authenticated the request and supplied the visitor's real IP.
   if (req._shimRealIp) return req._shimRealIp;
-  // Behind reverse proxy (Zeabur, Cloudflare, etc.) — trust x-forwarded-for
-  const xff = req.headers['x-forwarded-for'];
-  const ip = xff ? xff.split(',')[0].trim() : (req.socket.remoteAddress || req.ip);
+  // Behind reverse proxy (Caddy) with `trust proxy` set to 1 hop, Express resolves
+  // req.ip from the right-most (proxy-appended) X-Forwarded-For entry. Do NOT parse
+  // the header manually and take the first entry — that value comes straight from the
+  // client and is trivially spoofable, letting bots pick whatever IP they want to have
+  // checked against IP2Location/the blocklist instead of their real one.
+  const ip = req.ip || req.socket.remoteAddress;
   // Normalize IPv6-mapped IPv4 (::ffff:1.2.3.4 -> 1.2.3.4)
   if (ip && ip.startsWith('::ffff:')) return ip.substring(7);
   return ip || 'unknown';
@@ -1773,7 +1776,10 @@ app.get('/api/pages/:id/shim-zip', requireAuth, async (req, res) => {
     { name: 'index.php', content: php },
     { name: '.htaccess', content: shimHtaccess },
   ]);
-  const filename = crypto.randomBytes(8).toString('hex') + '.zip';
+  // Recognizable filename so users can actually find the file in their Downloads
+  // folder — a random hex name made completed downloads look like "nothing happened".
+  const safeName = (page.name || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'page';
+  const filename = safeName + '-deployment.zip';
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
   res.send(zip);

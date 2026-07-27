@@ -1,5 +1,29 @@
 const BASE = '';
 
+// Downloads a file via fetch (session cookie included) and saves it as a blob.
+// Unlike a plain <a href download>, failures surface as errors and the caller
+// can show visible feedback — a silent anchor click gives neither.
+async function downloadFile(url, fallbackName) {
+  const res = await fetch(BASE + url, { credentials: 'include' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Download failed (HTTP ' + res.status + ')');
+  }
+  const cd = res.headers.get('Content-Disposition') || '';
+  const m = cd.match(/filename="?([^";]+)"?/i);
+  const name = (m && m[1]) || fallbackName || 'download';
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objUrl;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+  return name;
+}
+
 async function request(method, url, body, isFormData) {
   const opts = { method, credentials: 'include' };
   if (body && !isFormData) {
@@ -55,6 +79,7 @@ const api = {
   rotatePageShimSecret: (pageId) => request('POST', '/api/pages/' + pageId + '/rotate-shim-secret'),
   getMyDeployment: (pageId) => request('GET', '/api/pages/' + pageId + '/my-deployment'),
   shimZipUrl: (pageId) => '/api/pages/' + pageId + '/shim-zip',
+  downloadShimZip: (pageId) => downloadFile('/api/pages/' + pageId + '/shim-zip', 'deployment.zip'),
 
   getLinks: () => request('GET', '/api/links'),
 

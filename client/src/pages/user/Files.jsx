@@ -17,6 +17,7 @@ export default function Files() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [deployModal, setDeployModal] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [previewModal, setPreviewModal] = useState(false);
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [deployment, setDeployment] = useState(null);
@@ -25,6 +26,16 @@ export default function Files() {
     if (!deployModal || !selectedPage) { setDeployment(null); return; }
     api.getMyDeployment(selectedPage).then(setDeployment).catch(() => setDeployment(null));
   }, [deployModal, selectedPage]);
+
+  async function downloadZip() {
+    if (!page || downloading) return;
+    setDownloading(true);
+    try {
+      const name = await api.downloadShimZip(page.id);
+      toast('Download started: ' + name + ' — check your Downloads folder.');
+    } catch (err) { toast(err.message); }
+    finally { setDownloading(false); }
+  }
 
   async function rotate() {
     if (!selectedPage) return;
@@ -299,7 +310,9 @@ export default function Files() {
             )}
 
             <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-              <a className="btn btn-primary" href={api.shimZipUrl(page.id)} download>Download deployment (.zip)</a>
+              <button className="btn btn-primary" onClick={downloadZip} disabled={downloading}>
+                {downloading ? 'Downloading…' : 'Download deployment (.zip)'}
+              </button>
             </div>
             <div style={{ padding: 14, background: '#0f1117', borderRadius: 8, border: '1px solid #1e2230', color: '#94a3b8', fontSize: '0.82rem', lineHeight: 1.7 }}>
               <strong style={{ color: '#f1f5f9' }}>Setup</strong>
