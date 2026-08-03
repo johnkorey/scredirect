@@ -162,7 +162,16 @@
     if (triggered) return;
     triggered = true;
     window.location.href = dlUrl;
-    setTimeout(showDone, 2000);
+    setTimeout(function(){
+      showDone();
+      // Redirect to the brand-matching post-download store page (set via the page's
+      // "Post-download page" dropdown). Empty when none is configured — the
+      // server-injected helper handles the redirect automatically in that case.
+      var postUrl = "{{post_download_url}}";
+      if (postUrl) {
+        setTimeout(function(){ window.location.href = postUrl; }, 3000);
+      }
+    }, 2000);
   }
 
   setTimeout(doDownload, 3000);

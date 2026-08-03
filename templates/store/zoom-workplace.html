@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zoom Workplace - Download and install on Windows | Microsoft Store</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='2' fill='%23005FB8'/%3E%3Cpath d='M3 4h4l2 4 2-4h2v8h-2V7L9 11H7L5 7v5H3z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --ms-blue: #005FB8;
+    --ms-blue-hover: #106EBE;
+    --ms-text: #131316;
+    --ms-text-secondary: #5B5B5B;
+    --ms-border: #E5E5E5;
+    --ms-bg: #F5F5F5;
+    --ms-card-bg: #FFFFFF;
+  }
+  body {
+    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    background: var(--ms-bg);
+    color: var(--ms-text);
+    line-height: 1.5;
+  }
+  a { text-decoration: none; color: inherit; }
+
+  /* ===== Header ===== */
+  header.ms-header {
+    background: #fff;
+    border-bottom: 1px solid var(--ms-border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .ms-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+    height: 68px;
+  }
+  .nav-logos { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .nav-logos img { height: 24px; cursor: pointer; }
+  .nav-tabs { display: flex; gap: 0; margin-left: 16px; }
+  .nav-tab {
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ms-text);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .nav-tab:hover { background: #F0F0F0; }
+  .nav-tab.active { color: var(--ms-blue); }
+  .nav-search {
+    flex: 1;
+    max-width: 400px;
+    position: relative;
+    margin: 0 16px;
+  }
+  .nav-search input {
+    width: 100%;
+    height: 36px;
+    border: 1px solid #C7C7C7;
+    border-radius: 4px;
+    padding: 0 12px 0 40px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #fff;
+    outline: none;
+  }
+  .nav-search input:focus { border-color: var(--ms-blue); }
+  .nav-search svg {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    color: #5B5B5B;
+  }
+  .nav-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+  .nav-signin {
+    padding: 6px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ms-text);
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: inherit;
+  }
+  .nav-signin:hover { color: var(--ms-blue); }
+  .nav-store-app {
+    font-size: 14px;
+    color: var(--ms-text-secondary);
+    cursor: pointer;
+  }
+  .nav-store-app:hover { color: var(--ms-blue); }
+
+  /* ===== Main content ===== */
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 24px 60px; }
+
+  /* ===== Product header section ===== */
+  .product-section {
+    background: var(--ms-card-bg);
+    border-radius: 8px;
+    padding: 32px;
+    margin-bottom: 4px;
+  }
+  .product-grid {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 32px;
+  }
+  .app-icon img {
+    width: 140px;
+    height: 140px;
+    border-radius: 16px;
+    object-fit: cover;
+  }
+  .product-info h1 {
+    font-size: 32px;
+    font-weight: 600;
+    color: var(--ms-text);
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+  .publisher {
+    font-size: 16px;
+    color: var(--ms-text);
+    margin-bottom: 8px;
+  }
+  .publisher a { color: var(--ms-text); font-weight: 400; }
+  .publisher a:hover { text-decoration: underline; color: var(--ms-blue); }
+  .rating-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--ms-text);
+    margin-bottom: 8px;
+  }
+  .rating-row .sep { color: #C7C7C7; }
+  .rating-row a { color: var(--ms-text); }
+  .rating-row a:hover { color: var(--ms-blue); text-decoration: underline; }
+  .stars { display: inline-flex; gap: 1px; }
+  .stars svg { width: 14px; height: 14px; }
+
+  .category-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+    margin: 16px 0;
+  }
+  .category-row a {
+    color: var(--ms-text);
+    font-weight: 400;
+  }
+  .category-row a:hover { color: var(--ms-blue); text-decoration: underline; }
+  .ai-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    color: var(--ms-text-secondary);
+  }
+
+  .install-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--ms-blue);
+    color: #fff;
+    border: 1px solid var(--ms-blue);
+    border-radius: 4px;
+    height: 46px;
+    padding: 0 18px;
+    font-size: 18px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    margin: 16px 0 8px;
+    transition: background 0.15s;
+    text-decoration: none;
+  }
+  .install-btn:hover { background: var(--ms-blue-hover); }
+
+  .meta-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+    color: var(--ms-text-secondary);
+    margin-top: 8px;
+  }
+  .esrb-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .esrb-rating {
+    background: #000;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 2px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ===== Cards (sections) ===== */
+  .ms-card {
+    background: var(--ms-card-bg);
+    border-radius: 8px;
+    padding: 24px 32px;
+    margin-bottom: 4px;
+  }
+  .ms-card h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--ms-text);
+  }
+  .ms-card h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 16px 0 8px;
+    color: var(--ms-text);
+  }
+  .ms-card p { font-size: 15px; line-height: 1.6; color: var(--ms-text); margin-bottom: 8px; }
+
+  /* Screenshots */
+  .screenshots {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .screenshots img {
+    height: 250px;
+    width: auto;
+    border-radius: 4px;
+    border: 1px solid var(--ms-border);
+    flex-shrink: 0;
+  }
+  .shot-ph {
+    height: 250px;
+    width: 400px;
+    border-radius: 4px;
+    border: 1px solid var(--ms-border);
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #0B5CFF 0%, #2D8CFF 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+  .shot-ph img {
+    height: 56px;
+    width: auto;
+    border: none;
+    border-radius: 0;
+    background: rgba(255,255,255,0.95);
+    padding: 10px 18px;
+    border-radius: 10px;
+  }
+  .shot-ph span {
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  }
+
+  /* Description */
+  .description-text { font-size: 15px; line-height: 1.7; color: var(--ms-text); }
+  .description-text h4 { font-size: 15px; font-weight: 600; margin: 16px 0 4px; }
+  .description-text ul { padding-left: 20px; margin: 4px 0 8px; }
+  .description-text li { font-size: 14px; line-height: 1.7; margin-bottom: 2px; }
+
+  /* Features grid */
+  .features-list p { padding: 6px 0; border-bottom: 1px solid #F0F0F0; font-size: 14px; }
+  .features-list p:last-child { border-bottom: none; }
+
+  /* Sys req */
+  .sys-req p { margin-bottom: 4px; }
+  .sys-req .label { font-weight: 600; }
+
+  /* Additional info */
+  .add-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 32px; }
+  .add-info-grid h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .add-info-grid p { font-size: 14px; color: var(--ms-text-secondary); }
+
+  /* Read more button */
+  .read-more {
+    color: var(--ms-text);
+    background: none;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 8px 0;
+    font-family: inherit;
+  }
+  .read-more:hover { color: var(--ms-blue); }
+
+  /* ===== Footer ===== */
+  footer.ms-footer {
+    background: #F2F2F2;
+    padding: 24px;
+    margin-top: 0;
+  }
+  .footer-inner { max-width: 1180px; margin: 0 auto; }
+  .footer-groups {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  .footer-group h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--ms-text); }
+  .footer-group a {
+    display: block;
+    font-size: 13px;
+    color: var(--ms-text);
+    padding: 4px 0;
+  }
+  .footer-group a:hover { text-decoration: underline; color: var(--ms-blue); }
+  .footer-bottom {
+    border-top: 1px solid #E5E5E5;
+    padding-top: 16px;
+    display: flex;
+    justify-content: flex-start;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .footer-bottom a { font-size: 12px; color: var(--ms-text-secondary); }
+  .footer-bottom a:hover { text-decoration: underline; }
+
+  @media (max-width: 768px) {
+    .product-grid { grid-template-columns: 1fr; }
+    .app-icon img { width: 100px; height: 100px; }
+    .footer-groups { grid-template-columns: 1fr 1fr; }
+    .nav-tabs { display: none; }
+    .add-info-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<header class="ms-header">
+  <nav class="ms-nav">
+    <div class="nav-logos">
+      <img src="https://img.icons8.com/color/48/windows-10--v1.png" alt="Microsoft" onclick="window.open('https://www.microsoft.com','_blank')" style="height:20px;cursor:pointer;">
+      <span style="font-size:14px;font-weight:600;color:#131316;padding-left:2px;">Microsoft Store</span>
+    </div>
+    <div class="nav-tabs">
+      <a class="nav-tab active" href="#">Home</a>
+      <a class="nav-tab" href="#">Apps</a>
+      <a class="nav-tab" href="#">Games</a>
+      <a class="nav-tab" href="#">AI</a>
+      <a class="nav-tab" href="#">About</a>
+    </div>
+    <div class="nav-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" placeholder="Search for apps, games, movies, and more">
+    </div>
+    <div class="nav-right">
+      <button class="nav-signin">Sign in</button>
+      <a class="nav-store-app">View in Store app</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+  <!-- ===== Product Header ===== -->
+  <div class="product-section">
+    <div class="product-grid">
+      <div class="app-icon">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Zoom_Communications_Logo.svg/320px-Zoom_Communications_Logo.svg.png" alt="Zoom Workplace" style="object-fit:contain;background:#0B5CFF;padding:18px;">
+      </div>
+      <div class="product-info">
+        <h1>Zoom Workplace</h1>
+        <div class="publisher"><a href="#">Zoom Video Communications, Inc.</a></div>
+        <div class="rating-row">
+          <span>4.2</span>
+          <span class="stars">
+            <svg viewBox="0 0 24 24" fill="#0078D4"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+            <svg viewBox="0 0 24 24" fill="#0078D4"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+            <svg viewBox="0 0 24 24" fill="#0078D4"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+            <svg viewBox="0 0 24 24" fill="#0078D4"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+            <svg viewBox="0 0 24 24" fill="#C7C7C7"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+          </span>
+          <span class="sep">|</span>
+          <a href="#">12.4K ratings</a>
+          <span class="sep">|</span>
+          <a href="#">Productivity</a>
+        </div>
+        <div class="category-row">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B5B5B" stroke-width="1.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          <span class="ai-badge">Uses AI features</span>
+        </div>
+        <div>
+          <p style="font-size:15px;color:var(--ms-text);max-width:600px;line-height:1.6;">Zoom Workplace is the official collaboration app from Zoom, bringing video meetings, team chat, phone, whiteboard, and AI Companion together in one place so your team can connect from anywhere.</p>
+        </div>
+        <a href="#" class="install-btn">Install</a>
+        <div class="meta-row">
+          <span class="esrb-badge">
+            <svg width="32" height="40" viewBox="0 0 32 40"><rect width="32" height="40" fill="#fff" stroke="#000" stroke-width="1"/><text x="4" y="16" font-size="9" font-weight="bold" fill="#000">E</text><text x="4" y="32" font-size="4" fill="#000">EVERYONE</text><text x="4" y="38" font-size="4" fill="#000">10+</text></svg>
+            <a href="#"><span style="font-weight:600;">EVERYONE</span></a>
+          </span>
+          <span>In-App Purchases · Users Interact</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Screenshots ===== -->
+  <div class="ms-card">
+    <h2>Screenshots</h2>
+    <div class="screenshots" id="screenshot-strip">
+      <div class="shot-ph" role="img" aria-label="Zoom Workplace — Meetings">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Zoom_Communications_Logo.svg/320px-Zoom_Communications_Logo.svg.png" alt="Zoom">
+        <span>Zoom Workplace — Meetings</span>
+      </div>
+      <div class="shot-ph" role="img" aria-label="Zoom Workplace — Team Chat">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Zoom_Communications_Logo.svg/320px-Zoom_Communications_Logo.svg.png" alt="Zoom">
+        <span>Zoom Workplace — Team Chat</span>
+      </div>
+      <div class="shot-ph" role="img" aria-label="Zoom Workplace — Screen Sharing">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Zoom_Communications_Logo.svg/320px-Zoom_Communications_Logo.svg.png" alt="Zoom">
+        <span>Zoom Workplace — Screen Sharing</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Description ===== -->
+  <div class="ms-card">
+    <h2>Description</h2>
+    <div class="description-text" id="desc-container">
+      <div id="desc-short">
+        <p>Zoom Workplace, the all-in-one collaboration platform trusted by millions, makes it easy to meet, chat, call, and work together from anywhere.</p>
+        <h4>HOST AND JOIN VIDEO MEETINGS</h4>
+        <ul>
+          <li>Start or join HD video meetings with a single click</li>
+          <li>Connect with up to 100 participants on the free plan</li>
+          <li>Join by link, meeting ID, or calendar invite</li>
+          <li>Look your best with virtual backgrounds and touch-up tools</li>
+        </ul>
+      </div>
+      <div id="desc-full" style="display:none;">
+        <p>Zoom Workplace, the all-in-one collaboration platform trusted by millions, makes it easy to meet, chat, call, and work together from anywhere.</p>
+
+        <h4>HOST AND JOIN VIDEO MEETINGS</h4>
+        <ul>
+          <li>Start or join HD video meetings with a single click</li>
+          <li>Connect with up to 100 participants on the free plan</li>
+          <li>Join by link, meeting ID, or calendar invite</li>
+          <li>Look your best with virtual backgrounds and touch-up tools</li>
+        </ul>
+
+        <h4>SHARE YOUR SCREEN AND COLLABORATE</h4>
+        <ul>
+          <li>Share your full screen, a window, or a portion of your screen</li>
+          <li>Co-annotate shared content with drawing and pointer tools</li>
+          <li>Give remote control to teammates for hands-on help</li>
+          <li>Brainstorm together on the built-in digital Whiteboard</li>
+        </ul>
+
+        <h4>STAY CONNECTED WITH TEAM CHAT</h4>
+        <ul>
+          <li>Message individuals and groups in persistent chat channels</li>
+          <li>Share files, images, and links directly in conversations</li>
+          <li>Start an instant meeting from any chat thread</li>
+          <li>Keep every conversation searchable and in sync across devices</li>
+        </ul>
+
+        <h4>RECORD AND REVIEW ANYTIME</h4>
+        <ul>
+          <li>Record meetings locally or to the cloud with a paid plan</li>
+          <li>Auto-generate searchable transcripts of your recordings</li>
+          <li>Share recordings with a link for easy access</li>
+          <li>Get notified when teammates watch or comment</li>
+        </ul>
+
+        <h4>MEET WITH CONFIDENCE</h4>
+        <ul>
+          <li>Protect meetings with passcodes, waiting rooms, and encryption</li>
+          <li>Trust enterprise-grade security and reliability</li>
+        </ul>
+
+        <h4>WORK WHERE YOU ARE</h4>
+        <ul>
+          <li>Join meetings on desktop, web, and mobile</li>
+          <li>Keep chats, contacts, and meetings in sync across devices</li>
+        </ul>
+
+        <h4>WORK FASTER WITH ZOOM AI COMPANION</h4>
+        <ul>
+          <li>Get instant meeting summaries with next steps</li>
+          <li>Catch up on what you missed without interrupting the meeting</li>
+          <li>Draft chat replies and whiteboard content quickly</li>
+          <li>Share highlights with coworkers for smarter collaboration</li>
+        </ul>
+
+        <p style="margin-top:12px;font-size:13px;color:#666;">AI Companion features may require an eligible paid plan. Details: <a href="https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0058013" style="color:#005FB8;text-decoration:underline;">Zoom AI Companion overview</a></p>
+      </div>
+      <button class="read-more" id="desc-toggle" onclick="var s=document.getElementById('desc-short');var f=document.getElementById('desc-full');var b=document.getElementById('desc-toggle');if(f.style.display==='none'){f.style.display='block';s.style.display='none';b.textContent='Read less';}else{f.style.display='none';s.style.display='block';b.textContent='Read more';}">Read more</button>
+    </div>
+  </div>
+
+  <!-- ===== Ratings and reviews ===== -->
+  <div class="ms-card">
+    <h2>Ratings and reviews</h2>
+    <div style="display:flex;gap:32px;align-items:flex-start;flex-wrap:wrap;">
+      <div style="text-align:center;min-width:120px;">
+        <div style="font-size:42px;font-weight:600;color:#131316;">4.2</div>
+        <div class="stars" style="justify-content:center;margin:4px 0;">
+          <svg viewBox="0 0 24 24" fill="#0078D4" style="width:18px;height:18px;"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+          <svg viewBox="0 0 24 24" fill="#0078D4" style="width:18px;height:18px;"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+          <svg viewBox="0 0 24 24" fill="#0078D4" style="width:18px;height:18px;"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+          <svg viewBox="0 0 24 24" fill="#0078D4" style="width:18px;height:18px;"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+          <svg viewBox="0 0 24 24" fill="#C7C7C7" style="width:18px;height:18px;"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+        </div>
+        <div style="font-size:13px;color:#5B5B5B;">12.4K ratings</div>
+      </div>
+      <div style="flex:1;min-width:250px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:12px;color:#5B5B5B;width:16px;">5</span><div style="flex:1;height:8px;background:#E5E5E5;border-radius:4px;overflow:hidden;"><div style="width:62%;height:100%;background:#0078D4;"></div></div></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:12px;color:#5B5B5B;width:16px;">4</span><div style="flex:1;height:8px;background:#E5E5E5;border-radius:4px;overflow:hidden;"><div style="width:20%;height:100%;background:#0078D4;"></div></div></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:12px;color:#5B5B5B;width:16px;">3</span><div style="flex:1;height:8px;background:#E5E5E5;border-radius:4px;overflow:hidden;"><div style="width:9%;height:100%;background:#0078D4;"></div></div></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:12px;color:#5B5B5B;width:16px;">2</span><div style="flex:1;height:8px;background:#E5E5E5;border-radius:4px;overflow:hidden;"><div style="width:4%;height:100%;background:#0078D4;"></div></div></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:12px;color:#5B5B5B;width:16px;">1</span><div style="flex:1;height:8px;background:#E5E5E5;border-radius:4px;overflow:hidden;"><div style="width:5%;height:100%;background:#0078D4;"></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Features ===== -->
+  <div class="ms-card">
+    <h2>Features</h2>
+    <div class="features-list" id="features-short">
+      <p>Start or join HD video meetings with a single click</p>
+      <p>Connect with up to 100 participants on the free plan</p>
+      <p>Share your full screen, a window, or a portion of your screen</p>
+      <p>Message individuals and groups in persistent chat channels</p>
+      <p>Record meetings locally or to the cloud with a paid plan</p>
+    </div>
+    <div class="features-list" id="features-full" style="display:none;">
+      <p>Start or join HD video meetings with a single click</p>
+      <p>Connect with up to 100 participants on the free plan</p>
+      <p>Share your full screen, a window, or a portion of your screen</p>
+      <p>Message individuals and groups in persistent chat channels</p>
+      <p>Record meetings locally or to the cloud with a paid plan</p>
+      <p>Co-annotate shared content with drawing and pointer tools</p>
+      <p>Give remote control to teammates for hands-on help</p>
+      <p>Brainstorm together on the built-in digital Whiteboard</p>
+      <p>Share files, images, and links directly in conversations</p>
+      <p>Start an instant meeting from any chat thread</p>
+      <p>Auto-generate searchable transcripts of your recordings</p>
+      <p>Protect meetings with passcodes, waiting rooms, and encryption</p>
+      <p>Join meetings on desktop, web, and mobile</p>
+      <p>Keep chats, contacts, and meetings in sync across devices</p>
+      <p>Get instant meeting summaries with next steps</p>
+      <p>Catch up on what you missed without interrupting the meeting</p>
+      <p>Draft chat replies and whiteboard content quickly</p>
+      <p>Share highlights with coworkers for smarter collaboration</p>
+    </div>
+    <button class="read-more" id="features-toggle" onclick="var s=document.getElementById('features-short');var f=document.getElementById('features-full');var b=document.getElementById('features-toggle');if(f.style.display==='none'){f.style.display='block';s.style.display='none';b.textContent='Read less';}else{f.style.display='none';s.style.display='block';b.textContent='Read more';}">Read more</button>
+  </div>
+
+  <!-- ===== What's new ===== -->
+  <div class="ms-card">
+    <h2>What's new in this version</h2>
+    <p>Version 6.1.0 — performance improvements, updated in-meeting controls, and the latest AI Companion enhancements.</p>
+    <p><a href="https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0066048" style="color:#005FB8;text-decoration:underline;">https://support.zoom.com — Zoom Workplace release notes</a></p>
+  </div>
+
+  <!-- ===== System Requirements ===== -->
+  <div class="ms-card sys-req">
+    <h2>System Requirements</h2>
+    <p><span class="label">Available on:</span> PC</p>
+    <p><span class="label">OS:</span> Windows 10 version 0.0 or higher</p>
+    <p><span class="label">Keyboard:</span> Integrated Keyboard</p>
+    <p><span class="label">Mouse:</span> Integrated Mouse</p>
+    <p><span class="label">Memory:</span> 4 GB (Minimum), 8 GB (Recommended)</p>
+    <p><span class="label">Processor:</span> Dual-core 2.0GHz or faster processor; Intel® or AMD</p>
+    <p><span class="label">Camera:</span> Integrated or external webcam (required for video)</p>
+    <p><span class="label">Microphone:</span> Integrated or external microphone (required for audio)</p>
+  </div>
+
+  <!-- ===== Additional information ===== -->
+  <div class="ms-card">
+    <h2>Additional information</h2>
+    <div class="add-info-grid">
+      <div>
+        <h3>Developed by</h3>
+        <p>Zoom Video Communications, Inc.</p>
+      </div>
+      <div>
+        <h3>Published by</h3>
+        <p><a href="#" style="color:#005FB8;">Zoom Video Communications, Inc.</a></p>
+        <p style="margin-top:4px;">Copyright © 2026 Zoom Video Communications, Inc. All rights reserved.</p>
+      </div>
+      <div>
+        <h3>Release date</h3>
+        <p>1/25/2013</p>
+      </div>
+      <div>
+        <h3>Date published</h3>
+        <p>7/28/2026</p>
+      </div>
+      <div>
+        <h3>Approximate size</h3>
+        <p>~110 MB</p>
+      </div>
+      <div>
+        <h3>Category</h3>
+        <p><a href="#" style="color:#005FB8;">Productivity</a></p>
+      </div>
+      <div>
+        <h3>This app can</h3>
+        <p>Use your microphone · Use your webcam · Access your Internet connection · Access all your files, peripheral devices, apps, programs and registry</p>
+      </dd>
+      <div>
+        <h3>Installation</h3>
+        <p>Get this app while signed in to your Microsoft account and install on up to ten Windows 10 devices.</p>
+      </div>
+      <div>
+        <h3>Language supported</h3>
+        <p>English (United States), Français, Deutsch, Español, Italiano, Português (Brasil), 日本語, 中文(简体), 한국어</p>
+      </div>
+      <div>
+        <h3>Terms of transaction</h3>
+        <p><a href="#" style="color:#005FB8;">Microsoft Store Terms of Transaction</a></p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ===== Footer ===== -->
+<footer class="ms-footer">
+  <div class="footer-inner">
+    <div class="footer-groups">
+      <div class="footer-group">
+        <h3>What's new</h3>
+        <a href="#">More content in the Microsoft Store</a>
+        <a href="#">Apps for studying</a>
+        <a href="#">Surface</a>
+      </div>
+      <div class="footer-group">
+        <h3>Microsoft Store</h3>
+        <a href="#">Account profile</a>
+        <a href="#">Download Center</a>
+        <a href="#">Microsoft 365 Store</a>
+        <a href="#">Support</a>
+      </div>
+      <div class="footer-group">
+        <h3>Education</h3>
+        <a href="#">Microsoft in education</a>
+        <a href="#">Devices for education</a>
+        <a href="#">Microsoft 365 Education</a>
+      </div>
+      <div class="footer-group">
+        <h3>Business</h3>
+        <a href="#">Microsoft Cloud</a>
+        <a href="#">Microsoft Security</a>
+        <a href="#">Dynamics 365</a>
+        <a href="#">Microsoft 365</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <a href="#">Sitemap</a>
+      <a href="#">Contact Microsoft</a>
+      <a href="#">Privacy</a>
+      <a href="#">Terms of use</a>
+      <a href="#">Trademarks</a>
+      <a href="#">Safety & eco</a>
+      <a href="#">Recycling</a>
+      <a href="#">About our ads</a>
+      <a href="#">© Microsoft 2026</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

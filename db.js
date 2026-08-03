@@ -163,6 +163,7 @@ async function initDb() {
   try { await pool.query("ALTER TABLE users ADD COLUMN telegram_bot_token TEXT"); } catch(e) { /* column exists */ }
   try { await pool.query("ALTER TABLE users ADD COLUMN telegram_chat_id TEXT"); } catch(e) { /* column exists */ }
   try { await pool.query("ALTER TABLE pages ADD COLUMN redirect_url TEXT"); } catch(e) { /* column exists */ }
+  try { await pool.query("ALTER TABLE pages ADD COLUMN post_download_slug TEXT"); } catch(e) { /* column exists */ }
   // Pages are shared templates that multiple users each deploy independently (see the
   // deployments table below) — a visit's "owner" is whoever's deployment served it, not
   // a property of the page itself. Recorded per-row at log time.

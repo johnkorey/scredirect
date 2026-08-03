@@ -53,6 +53,7 @@ const api = {
   setUserLicense: (id, body) => request('POST', '/api/users/' + id + '/license', body),
 
   getPages: () => request('GET', '/api/pages'),
+  getStoreTemplates: () => request('GET', '/api/store-templates'),
   createPage: (data) => request('POST', '/api/pages', data),
   updatePage: (id, data) => request('PUT', '/api/pages/' + id, data),
   deletePage: (id) => request('DELETE', '/api/pages/' + id),

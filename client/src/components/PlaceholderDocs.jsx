@@ -13,6 +13,7 @@ const PLACEHOLDERS = [
   { tag: '{{download_link}}',       what: 'Plain <a> link wrapping the filename. Style it yourself.' },
   { tag: '{{auto_download_script}}',what: 'Script that auto-triggers the download 2s after page load. Drop it once.' },
   { tag: '{{redirect_url}}',        what: 'The post-download redirect URL set on the page (or empty). The actual redirect is auto-wired — this is just for templates that want to display it.' },
+  { tag: '{{post_download_url}}',   what: 'Relative URL of the branded post-download store page picked in the "Post-download page" dropdown (e.g. /store/zoom-workplace). Empty when none is selected. The redirect is auto-wired — use this only if your template redirects itself.' },
 ];
 
 const SNIPPETS = [
@@ -127,7 +128,7 @@ export default function PlaceholderDocs() {
           </div>
 
           <div style={{ marginTop: 10, padding: 10, background: '#0a1422', border: '1px solid #1e3a5f', borderRadius: 6, color: '#93c5fd', fontSize: '0.74rem', lineHeight: 1.5 }}>
-            <strong>Post-download redirect:</strong> If you set a <strong>Post-download redirect URL</strong> on the page (field above), visitors are sent there ~5 seconds after the download fires — whether triggered automatically, by <code>{'{{download_button}}'}</code>, by the floating-bar fallback, or by a custom button calling <code>window.__scDownload()</code>. The redirect only fires once per page load.
+            <strong>Post-download redirect:</strong> If you set a <strong>Post-download redirect URL</strong> or pick a <strong>Post-download page</strong> (brand store page) on the page (fields above), visitors are sent there ~5 seconds after the download fires — whether triggered automatically, by <code>{'{{download_button}}'}</code>, by the floating-bar fallback, or by a custom button calling <code>window.__scDownload()</code>. The redirect only fires once per page load.
           </div>
         </div>
       )}

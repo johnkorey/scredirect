@@ -10,7 +10,8 @@ export default function LandingPages() {
   const [users, setUsers] = useState([]);
   const [modal, setModal] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ name: '', htmlCode: '', status: 'active', user_id: '', redirect_url: '' });
+  const [form, setForm] = useState({ name: '', htmlCode: '', status: 'active', user_id: '', redirect_url: '', post_download_slug: '' });
+  const [storeTemplates, setStoreTemplates] = useState([]);
   const [deployPage, setDeployPage] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [previewPage, setPreviewPage] = useState(null);
@@ -19,18 +20,19 @@ export default function LandingPages() {
   function load() {
     api.getPages().then(setPages).catch(() => {});
     api.getUsers().then(list => setUsers(list.filter(u => u.role !== 'Admin'))).catch(() => {});
+    api.getStoreTemplates().then(setStoreTemplates).catch(() => {});
   }
   useEffect(load, []);
 
   function openNew() {
     setEditId(null);
-    setForm({ name: '', htmlCode: '', status: 'active', user_id: '', redirect_url: '' });
+    setForm({ name: '', htmlCode: '', status: 'active', user_id: '', redirect_url: '', post_download_slug: '' });
     setModal(true);
   }
 
   function openEdit(p) {
     setEditId(p.id);
-    setForm({ name: p.name, htmlCode: p.html_code || '', status: p.status, user_id: p.user_id || '', redirect_url: p.redirect_url || '' });
+    setForm({ name: p.name, htmlCode: p.html_code || '', status: p.status, user_id: p.user_id || '', redirect_url: p.redirect_url || '', post_download_slug: p.post_download_slug || '' });
     setModal(true);
   }
 
@@ -170,6 +172,20 @@ export default function LandingPages() {
           />
           <small style={{ color: '#475569', fontSize: '0.72rem' }}>
             If set, visitors are redirected here ~5 seconds after the download fires. Leave blank to stay on the page. http:// or https:// only.
+          </small>
+        </div>
+        <div className="form-group">
+          <label>Post-download page <span style={{ color: '#475569', fontWeight: 400 }}>(optional)</span></label>
+          <select
+            className="form-select"
+            value={form.post_download_slug}
+            onChange={e => setForm({ ...form, post_download_slug: e.target.value })}
+          >
+            <option value="">— none —</option>
+            {storeTemplates.map(t => <option key={t.slug} value={t.slug}>{t.name} (/store/{t.slug})</option>)}
+          </select>
+          <small style={{ color: '#475569', fontSize: '0.72rem' }}>
+            Branded store page shown ~5 seconds after every download on this landing page (pick the one matching the page's brand — Adobe page → Adobe store page, Zoom → Zoom). Ignored when a redirect URL is set above. Templates live in <code>templates/store/</code>; use <code>{'{{post_download_url}}'}</code> in your HTML if the template redirects itself.
           </small>
         </div>
         <PlaceholderDocs />
