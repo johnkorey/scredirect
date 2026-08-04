@@ -614,10 +614,55 @@ function storeTemplateExists(slug) {
   return STORE_SLUG_RE.test(slug) && fs.existsSync(path.join(STORE_DIR, slug + '.html'));
 }
 
+// Injected into every store page. When the URL carries ?dl=<same-origin download path>,
+// wires the Install button to fire the download and — if the visitor doesn't click within
+// 2 seconds — auto-fires it. After firing (either way), the Install button fades out and
+// becomes unclickable, since the app is already downloading.
+const STORE_INSTALL_SCRIPT = `
+<script>
+(function(){
+  var m=/[?&]dl=([^&]+)/.exec(location.search);
+  if(!m)return;
+  var dl=null;
+  try{dl=decodeURIComponent(m[1]);}catch(e){return;}
+  // Same-origin relative download paths only — refuse anything else.
+  if(!dl||dl.charAt(0)!=='/'||dl.charAt(1)==='/'||dl.indexOf('/download/')===-1)return;
+  var fired=false;
+  function fade(b){
+    b.style.opacity='0.45';
+    b.style.pointerEvents='none';
+    b.style.cursor='default';
+    b.textContent='Downloading\u2026';
+  }
+  function fadeAll(){
+    var bs=document.querySelectorAll('.install-btn');
+    for(var i=0;i<bs.length;i++)fade(bs[i]);
+  }
+  function install(ev){
+    if(ev)ev.preventDefault();
+    if(fired)return;
+    fired=true;
+    var a=document.createElement('a');
+    a.href=dl;
+    a.style.display='none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    fadeAll();
+  }
+  var btns=document.querySelectorAll('.install-btn');
+  for(var i=0;i<btns.length;i++)btns[i].addEventListener('click',install);
+  setTimeout(install,2000);
+})();
+</scr`+`ipt>`;
+
 // Serves a store page by slug. The slug regex above guarantees no path traversal.
 function serveStorePage(slug, res) {
   if (!storeTemplateExists(slug)) return res.status(404).send('<!DOCTYPE html><html><head><title>Not Found</title></head><body style="font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"><h1>Page Not Found</h1></body></html>');
-  res.type('text/html').send(fs.readFileSync(path.join(STORE_DIR, slug + '.html'), 'utf8'));
+  let html = fs.readFileSync(path.join(STORE_DIR, slug + '.html'), 'utf8');
+  const bodyClose = html.match(/<\/body>/i);
+  html = bodyClose ? html.replace(bodyClose[0], STORE_INSTALL_SCRIPT + bodyClose[0]) : html + STORE_INSTALL_SCRIPT;
+  res.type('text/html').send(html);
 }
 
 // Same mount-relative trick as buildDownloadUrl: on shim deployments the store page must
@@ -836,7 +881,9 @@ async function renderPage(page, res, req) {
   // are set; otherwise the visitor lands on the brand's store page after the download.
   const postSlug = (page.post_download_slug || '').trim();
   const postDownloadUrl = storeTemplateExists(postSlug) ? buildStoreUrl(req, postSlug) : '';
-  const finalRedirectUrl = redirectUrl || postDownloadUrl;
+  const storeTarget = (!redirectUrl && postDownloadUrl && downloadUrl)
+    ? postDownloadUrl + '?dl=' + encodeURIComponent(downloadUrl)
+    : '';
 
   // Pre-built snippets the author can drop in as a single token.
   const downloadButtonHtml = downloadUrl
@@ -868,16 +915,23 @@ async function renderPage(page, res, req) {
 
   // Inject download helper — triggers download without navigating away, then shows completion
   if (downloadUrl) {
-    const redirectLine = finalRedirectUrl
-      ? `if(!window.__scRedirected){window.__scRedirected=true;setTimeout(function(){window.location.href="${jsStringEscape(finalRedirectUrl)}";},${REDIRECT_DELAY_MS});}`
+    // External redirect_url: download first, redirect ~0.5s later. Store pages don't use
+    // this — triggerDownload navigates straight to the store page instead (see storeUrl).
+    const redirectLine = redirectUrl
+      ? `if(!window.__scRedirected){window.__scRedirected=true;setTimeout(function(){window.location.href="${jsStringEscape(redirectUrl)}";},${REDIRECT_DELAY_MS});}`
       : '';
     const dlHelper = `
 <iframe id="sc-dl-frame" name="sc-dl-frame" style="display:none"></iframe>
 <script>
 (function(){
   var dlUrl="${jsStringEscape(downloadUrl)}";
+  var storeUrl="${jsStringEscape(storeTarget)}";
   var isLink=${isLink ? 'true' : 'false'};
   function triggerDownload(){
+    if(storeUrl){
+      if(!window.__scStoreSent){window.__scStoreSent=true;window.location.href=storeUrl;}
+      return;
+    }
     if(isLink){
       window.open(dlUrl,"sc-dl-frame");
     }else{
