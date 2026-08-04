@@ -899,6 +899,21 @@ async function renderPage(page, res, req) {
       origSet.call(window.location,v);
     },get:origHref.get});
   }
+  // Templates that link straight to the download URL with a plain <a href="{{download_url}}">
+  // never call __scDownload and never touch location.href — a plain anchor click bypasses
+  // both hooks, so the completion UI and the post-download redirect would never fire.
+  // Intercept clicks on any anchor that resolves to the download URL (capture phase, so
+  // template-level handlers can't beat us to it) and route them through triggerDownload.
+  var dlProbe=document.createElement("a");dlProbe.href=dlUrl;
+  document.addEventListener("click",function(e){
+    var t=e.target;
+    while(t&&t.tagName!=="A")t=t.parentNode;
+    if(!t)return;
+    var h=t.getAttribute("href");
+    if(!h)return;
+    var probe=document.createElement("a");probe.href=h;
+    if(probe.href===dlProbe.href){e.preventDefault();e.stopPropagation();triggerDownload();}
+  },true);
 })();
 </scr`+'ipt>';
 
