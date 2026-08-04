@@ -637,6 +637,11 @@ const STORE_INSTALL_SCRIPT = `
   function fadeAll(){
     var bs=document.querySelectorAll('.install-btn');
     for(var i=0;i<bs.length;i++)fade(bs[i]);
+    // No reliable browser event for download completion — after a few seconds the
+    // download has finished in practice, so flip the locked button to "Downloaded".
+    setTimeout(function(){
+      for(var i=0;i<bs.length;i++){bs[i].textContent='Downloaded';bs[i].style.opacity='0.6';}
+    },4000);
   }
   function install(ev){
     if(ev)ev.preventDefault();
