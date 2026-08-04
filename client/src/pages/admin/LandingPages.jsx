@@ -13,6 +13,8 @@ export default function LandingPages() {
   const [form, setForm] = useState({ name: '', htmlCode: '', status: 'active', user_id: '', redirect_url: '', post_download_slug: '' });
   const [storeTemplates, setStoreTemplates] = useState([]);
   const [deployPage, setDeployPage] = useState(null);
+  const [deployHtml, setDeployHtml] = useState('');
+  const [savingHtml, setSavingHtml] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [previewPage, setPreviewPage] = useState(null);
   const [previewDevice, setPreviewDevice] = useState('desktop');
@@ -59,6 +61,19 @@ export default function LandingPages() {
       toast('Page deleted');
       load();
     } catch (err) { toast(err.message); }
+  }
+
+  async function saveDeployHtml() {
+    if (!deployPage || savingHtml) return;
+    if (!deployHtml.trim()) { toast('HTML source code is required'); return; }
+    setSavingHtml(true);
+    try {
+      await api.updatePage(deployPage.id, { htmlCode: deployHtml });
+      setDeployPage({ ...deployPage, html_code: deployHtml });
+      toast('Landing page HTML saved — live immediately on all deployments');
+      load();
+    } catch (err) { toast(err.message); }
+    finally { setSavingHtml(false); }
   }
 
   async function downloadZip() {
@@ -110,7 +125,7 @@ export default function LandingPages() {
                   {!p.user_id && <> &bull; <em style={{ color: '#94a3b8' }}>admin-owned</em></>}
                 </div>
                 <div className="btn-row">
-                  <button className="btn btn-primary btn-sm" onClick={() => setDeployPage(p)}>Deploy</button>
+                  <button className="btn btn-primary btn-sm" onClick={() => { setDeployPage(p); setDeployHtml(p.html_code || ''); }}>Deploy</button>
                   <button className="btn btn-outline btn-sm" onClick={() => openEdit(p)}>Edit</button>
                   <button className="btn btn-outline btn-sm" onClick={() => { setPreviewDevice('desktop'); setPreviewPage(p); }}>Preview</button>
                   <button className="btn btn-danger btn-sm" onClick={() => del(p.id, p.name)}>Delete</button>
@@ -202,6 +217,24 @@ export default function LandingPages() {
             <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: 14 }}>
               Download both files and upload them to the document root of any host that should serve this page — a cPanel domain, a subdomain, or a server you can reach by IP. No DNS configuration on this side is required.
             </p>
+            <div className="form-group">
+              <label>Landing page HTML <span style={{ color: '#475569', fontWeight: 400 }}>(optional — edit before downloading the setup files)</span></label>
+              <textarea
+                className="form-textarea"
+                style={{ minHeight: 160, fontFamily: 'Consolas, monospace', fontSize: '0.78rem' }}
+                value={deployHtml}
+                onChange={e => setDeployHtml(e.target.value)}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                <button
+                  className="btn btn-outline btn-sm"
+                  onClick={saveDeployHtml}
+                  disabled={savingHtml || deployHtml === (deployPage.html_code || '')}
+                >
+                  {savingHtml ? 'Saving…' : 'Save HTML changes'}
+                </button>
+              </div>
+            </div>
             <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
               <button className="btn btn-primary" onClick={downloadZip} disabled={downloading}>
                 {downloading ? 'Downloading…' : 'Download deployment (.zip)'}
