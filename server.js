@@ -384,7 +384,9 @@ function checkIp2locationBlock(ipData) {
   if (p.is_public_proxy) reasons.push('Public proxy');
   if (p.is_web_proxy) reasons.push('Web proxy');
   if (p.is_web_crawler) reasons.push('Web crawler');
-  if (ipData.usage_type && BLOCKED_USAGE_TYPES.has(ipData.usage_type)) {
+  // IP2Location can return combined usage types (e.g. "SES/AIC", "ISP/MOB") — block if
+  // ANY segment is a blocked type, otherwise "SES/AIC" slips past the exact-match check.
+  if (ipData.usage_type && ipData.usage_type.split('/').some(t => BLOCKED_USAGE_TYPES.has(t.trim()))) {
     reasons.push('Blocked usage type: ' + ipData.usage_type);
   }
   return reasons.length > 0 ? { blocked: true, reason: reasons.join('; ') } : { blocked: false, reason: null };
