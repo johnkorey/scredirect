@@ -825,8 +825,11 @@ async function renderPage(page, res, req) {
   }
   const year = String(new Date().getFullYear());
   // Post-download redirect — http(s) only (validated on save, re-checked here to be defensive
-  // against legacy/malformed rows). Fires REDIRECT_DELAY_MS after the download is triggered.
-  const REDIRECT_DELAY_MS = 5000;
+  // against legacy/malformed rows). Fires ~0.5s after the download is triggered: the visitor
+  // lands on the store page almost immediately while the already-started download continues
+  // in the background. (Redirecting *before* firing the download would kill the page's JS
+  // and could cancel the download, so the download always fires first.)
+  const REDIRECT_DELAY_MS = 500;
   const rawRedirect = (page.redirect_url || '').trim();
   const redirectUrl = /^https?:\/\//i.test(rawRedirect) ? rawRedirect : '';
   // Post-download store page (per-brand). An explicit external redirect_url wins when both
