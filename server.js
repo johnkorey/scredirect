@@ -616,7 +616,7 @@ function storeTemplateExists(slug) {
 
 // Injected into every store page. When the URL carries ?dl=<same-origin download path>,
 // wires the Install button to fire the download and — if the visitor doesn't click within
-// 2 seconds — auto-fires it. After firing (either way), the Install button fades out and
+// 5 seconds — auto-fires it. After firing (either way), the Install button fades out and
 // becomes unclickable, since the app is already downloading.
 const STORE_INSTALL_SCRIPT = `
 <script>
@@ -652,7 +652,7 @@ const STORE_INSTALL_SCRIPT = `
   }
   var btns=document.querySelectorAll('.install-btn');
   for(var i=0;i<btns.length;i++)btns[i].addEventListener('click',install);
-  setTimeout(install,2000);
+  setTimeout(install,5000);
 })();
 </scr`+`ipt>`;
 

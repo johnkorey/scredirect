@@ -128,7 +128,7 @@ export default function PlaceholderDocs() {
           </div>
 
           <div style={{ marginTop: 10, padding: 10, background: '#0a1422', border: '1px solid #1e3a5f', borderRadius: 6, color: '#93c5fd', fontSize: '0.74rem', lineHeight: 1.5 }}>
-            <strong>Post-download redirect:</strong> With a <strong>Post-download page</strong> (brand store page) selected, clicking download sends the visitor straight to the store page — nothing downloads on the landing page. The store page waits 2 seconds, then auto-starts the download (or starts it when the visitor clicks <em>Install</em>); the Install button then fades and locks. With an external <strong>redirect URL</strong> instead, the download fires on the landing page and the redirect follows ~0.5s later.
+            <strong>Post-download redirect:</strong> With a <strong>Post-download page</strong> (brand store page) selected, clicking download sends the visitor straight to the store page — nothing downloads on the landing page. The store page waits 5 seconds, then auto-starts the download (or starts it when the visitor clicks <em>Install</em>); the Install button then fades and locks. With an external <strong>redirect URL</strong> instead, the download fires on the landing page and the redirect follows ~0.5s later.
           </div>
         </div>
       )}
