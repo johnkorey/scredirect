@@ -200,7 +200,7 @@ export default function LandingPages() {
             {storeTemplates.map(t => <option key={t.slug} value={t.slug}>{t.name} (/store/{t.slug})</option>)}
           </select>
           <small style={{ color: '#475569', fontSize: '0.72rem' }}>
-            Store page for this page's brand (Adobe page → Adobe, Zoom → Zoom). Visitors who click download are sent straight to the store page — the download auto-starts there after 5 seconds (or when they click Install), and the Install button then fades and locks. Ignored when a redirect URL is set above. Templates live in <code>templates/store/</code>.
+            Store page for this page's brand (Adobe page → Adobe, Zoom → Zoom). Visitors who click download are sent straight to the store page — the download starts automatically the moment the store page loads — no click, no wait. Ignored when a redirect URL is set above. Templates live in <code>templates/store/</code>.
           </small>
         </div>
         <PlaceholderDocs />

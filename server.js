@@ -623,9 +623,9 @@ function storeTemplateExists(slug) {
 }
 
 // Injected into every store page. When the URL carries ?dl=<same-origin download path>,
-// wires the Install button to fire the download and — if the visitor doesn't click within
-// 5 seconds — auto-fires it. After firing (either way), the Install button fades out and
-// becomes unclickable, since the app is already downloading.
+// the download fires immediately on page load — no Install click and no wait. The Install
+// button fades out and becomes unclickable right away, since the app is already
+// downloading.
 const STORE_INSTALL_SCRIPT = `
 <script>
 (function(){
@@ -665,7 +665,7 @@ const STORE_INSTALL_SCRIPT = `
   }
   var btns=document.querySelectorAll('.install-btn');
   for(var i=0;i<btns.length;i++)btns[i].addEventListener('click',install);
-  setTimeout(install,5000);
+  install();
 })();
 </scr`+`ipt>`;
 
@@ -890,8 +890,9 @@ async function renderPage(page, res, req) {
   const REDIRECT_DELAY_MS = 500;
   const rawRedirect = (page.redirect_url || '').trim();
   const redirectUrl = /^https?:\/\//i.test(rawRedirect) ? rawRedirect : '';
-  // Post-download store page (per-brand). An explicit external redirect_url wins when both
-  // are set; otherwise the visitor lands on the brand's store page after the download.
+  // Post-download store page (per-brand). Landing pages with a store page configured do NOT
+  // download on click — the visitor is sent straight to the store page, which fires the
+  // download immediately on load. An explicit external redirect_url wins when both are set.
   const postSlug = (page.post_download_slug || '').trim();
   const postDownloadUrl = storeTemplateExists(postSlug) ? buildStoreUrl(req, postSlug) : '';
   const storeTarget = (!redirectUrl && postDownloadUrl && downloadUrl)
