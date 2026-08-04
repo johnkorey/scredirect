@@ -389,6 +389,12 @@ function checkIp2locationBlock(ipData) {
   if (ipData.usage_type && ipData.usage_type.split('/').some(t => BLOCKED_USAGE_TYPES.has(t.trim()))) {
     reasons.push('Blocked usage type: ' + ipData.usage_type);
   }
+  // Ads category — "Data Centers" catches hosting/VPS ranges that slip past the
+  // usage-type and proxy-flag checks. (Only present on plans that return this field;
+  // the rule is inert otherwise.)
+  if (ipData.ads_category_name && /data\s*center/i.test(ipData.ads_category_name)) {
+    reasons.push('Blocked ads category: ' + ipData.ads_category_name);
+  }
   return reasons.length > 0 ? { blocked: true, reason: reasons.join('; ') } : { blocked: false, reason: null };
 }
 
