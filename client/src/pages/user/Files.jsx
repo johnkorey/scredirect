@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../../api';
 import Modal from '../../components/Modal';
+import PersonalizeModal from '../../components/PersonalizeModal';
 import { useToast } from '../../components/Toast';
 
 export default function Files() {
@@ -21,11 +22,37 @@ export default function Files() {
   const [previewModal, setPreviewModal] = useState(false);
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [deployment, setDeployment] = useState(null);
+  const [personalHtml, setPersonalHtml] = useState(null); // non-null => personalize modal open
 
   useEffect(() => {
     if (!deployModal || !selectedPage) { setDeployment(null); return; }
     api.getMyDeployment(selectedPage).then(setDeployment).catch(() => setDeployment(null));
   }, [deployModal, selectedPage]);
+
+  async function openPersonalize() {
+    if (!page) return;
+    try {
+      const r = await api.getPersonalPage(page.id);
+      setPersonalHtml(r.html_code);
+    } catch (err) { toast(err.message); }
+  }
+
+  async function savePersonalize(html) {
+    await api.savePersonalPage(page.id, html);
+    toast('Your personalized version of "' + page.name + '" is live on all your deployments.');
+    setPersonalHtml(null);
+    load();
+  }
+
+  async function resetPersonalize() {
+    if (!page) return;
+    if (!confirm('Remove your personalization for "' + page.name + '" and go back to the shared template?')) return;
+    try {
+      await api.resetPersonalPage(page.id);
+      toast('Reverted to the shared template.');
+      load();
+    } catch (err) { toast(err.message); }
+  }
 
   async function downloadZip() {
     if (!page || downloading) return;
@@ -132,7 +159,10 @@ export default function Files() {
           </select>
           <span className="badge badge-green">{activeV ? 'Active: v' + activeV.version : 'No active version'}</span>
           {selectedPage && (
-            <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+            <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', alignItems: 'center' }}>
+              {page?.has_variant && <span className="badge badge-green">Personalized</span>}
+              <button className="btn btn-outline btn-sm" onClick={openPersonalize}>Personalize</button>
+              {page?.has_variant && <button className="btn btn-outline btn-sm" onClick={resetPersonalize}>Reset</button>}
               <button className="btn btn-outline btn-sm" onClick={() => { setPreviewDevice('desktop'); setPreviewModal(true); }}>Preview</button>
               <button className="btn btn-primary btn-sm" onClick={() => setDeployModal(true)}>Deploy to a host</button>
             </div>
@@ -332,6 +362,15 @@ export default function Files() {
           </div>
         )}
       </Modal>
+
+      {personalHtml !== null && page && (
+        <PersonalizeModal
+          title={'Personalize: ' + page.name}
+          initialHtml={personalHtml}
+          onClose={() => setPersonalHtml(null)}
+          onSave={savePersonalize}
+        />
+      )}
 
       <Modal
         title={page ? 'Preview: ' + page.name : 'Preview'}
