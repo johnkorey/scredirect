@@ -54,6 +54,9 @@ const api = {
 
   getPages: () => request('GET', '/api/pages'),
   getStoreTemplates: () => request('GET', '/api/store-templates'),
+  getPersonalPage: (id) => request('GET', '/api/pages/' + id + '/personal'),
+  savePersonalPage: (id, htmlCode) => request('PUT', '/api/pages/' + id + '/personal', { htmlCode }),
+  resetPersonalPage: (id) => request('DELETE', '/api/pages/' + id + '/personal'),
   createPage: (data) => request('POST', '/api/pages', data),
   updatePage: (id, data) => request('PUT', '/api/pages/' + id, data),
   deletePage: (id) => request('DELETE', '/api/pages/' + id),

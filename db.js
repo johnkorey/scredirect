@@ -186,6 +186,18 @@ async function initDb() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_deployments_secret ON deployments (shim_secret)`);
 
+  // Per-user personalized copies of landing page templates. A user's deployments and
+  // previews serve their variant; everyone else keeps the shared pages.html_code.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS page_variants (
+      page_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      html_code TEXT,
+      updated TEXT,
+      PRIMARY KEY (page_id, user_id)
+    )
+  `);
+
   // Seed default admin
   const adminCheck = await pool.query("SELECT id FROM users WHERE role = 'Admin' LIMIT 1");
   if (adminCheck.rows.length === 0) {

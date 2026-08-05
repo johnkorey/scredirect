@@ -870,6 +870,14 @@ async function notifyUpload(page, version, uploader) {
 // Shared page renderer
 async function renderPage(page, res, req) {
   const effectiveUid = effectiveUserForRequest(req);
+  // Per-user personalization: if this user (deployment owner for shim traffic, or the
+  // logged-in previewer) saved their own copy of the template, serve theirs instead of
+  // the shared pages.html_code.
+  let htmlSource = page.html_code;
+  if (effectiveUid) {
+    const variant = await queryOne('SELECT html_code FROM page_variants WHERE page_id = ? AND user_id = ?', [page.id, effectiveUid]);
+    if (variant && variant.html_code) htmlSource = variant.html_code;
+  }
   const activeVersion = await findActiveVersion(page.id, effectiveUid);
   const isLink = activeVersion && activeVersion.link_url;
   const downloadUrl = activeVersion ? buildDownloadUrl(req, page.id) : '';
@@ -911,7 +919,7 @@ async function renderPage(page, res, req) {
     ? `<script>setTimeout(function(){if(window.__scDownload){window.__scDownload();}},2000);</script>`
     : '';
 
-  let html = page.html_code;
+  let html = htmlSource;
   // Substitutions go into HTML attribute / text context within an admin-controlled template.
   // HTML-escape so a hostile original_name (e.g. "><script>...) can't break out.
   html = html.replace(/\{\{download_url\}\}/g, htmlAttrEscape(downloadUrl));
@@ -998,7 +1006,7 @@ async function renderPage(page, res, req) {
   }
 
   // Only inject floating bar + auto-download if the template does NOT already handle downloads
-  const templateHandlesDownload = /\{\{(download_url|download_button|download_link|auto_download_script)\}\}/.test(page.html_code);
+  const templateHandlesDownload = /\{\{(download_url|download_button|download_link|auto_download_script)\}\}/.test(htmlSource);
 
   if (downloadUrl && !templateHandlesDownload) {
     // Floating download button for templates without a download button.
@@ -1494,6 +1502,8 @@ app.get('/api/pages', requireAuth, async (req, res) => {
         [p.id, userId]
       );
     }
+    // Whether the requesting user has a personalized copy of this page.
+    p.has_variant = !!(await queryOne('SELECT 1 AS x FROM page_variants WHERE page_id = ? AND user_id = ?', [p.id, userId]));
   }
   res.json(pages);
 });
@@ -1572,6 +1582,35 @@ app.put('/api/pages/:id', requireAdmin, async (req, res) => {
     [name || page.name, htmlCode !== undefined ? htmlCode : page.html_code, status || page.status, ownerId, nextRedirect, nextPostSlug, req.params.id]
   );
   logActivity('Page Updated', 'Updated page: ' + (name || page.name), req.session.user.name);
+  res.json({ ok: true });
+});
+
+// ═══════════ PER-USER PAGE PERSONALIZATION ═══════════
+// Any logged-in user can save their own copy of a page's template. Their deployments and
+// previews serve the variant; the shared template (and other users) are unaffected.
+app.get('/api/pages/:id/personal', requireAuth, async (req, res) => {
+  const page = await queryOne('SELECT id, html_code FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const variant = await queryOne('SELECT html_code FROM page_variants WHERE page_id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
+  res.json({ html_code: variant ? variant.html_code : page.html_code, personalized: !!variant });
+});
+
+app.put('/api/pages/:id/personal', requireAuth, async (req, res) => {
+  const { htmlCode } = req.body;
+  if (!htmlCode || !String(htmlCode).trim()) return res.status(400).json({ error: 'HTML source code is required' });
+  const page = await queryOne('SELECT id, name FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const now = new Date().toISOString();
+  await runSql(
+    'INSERT INTO page_variants (page_id, user_id, html_code, updated) VALUES (?, ?, ?, ?) ON CONFLICT (page_id, user_id) DO UPDATE SET html_code = ?, updated = ?',
+    [req.params.id, req.session.user.id, htmlCode, now, htmlCode, now]
+  );
+  logActivity('Page Personalized', 'Personalized page: ' + page.name, req.session.user.name);
+  res.json({ ok: true });
+});
+
+app.delete('/api/pages/:id/personal', requireAuth, async (req, res) => {
+  await runSql('DELETE FROM page_variants WHERE page_id = ? AND user_id = ?', [req.params.id, req.session.user.id]);
   res.json({ ok: true });
 });
 

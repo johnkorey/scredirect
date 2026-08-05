@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api';
 import { useAuth } from '../../AuthContext';
 import { useToast } from '../../components/Toast';
+import PersonalizeModal from '../../components/PersonalizeModal';
 
 function TelegramCard() {
   const toast = useToast();
@@ -120,9 +121,29 @@ function fmtDuration(ms) {
 export default function Home() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [stats, setStats] = useState({});
   const [pages, setPages] = useState([]);
   const [, force] = useState(0);
+  const [personal, setPersonal] = useState(null); // { page, html }
+
+  function reloadPages() { api.getPages().then(setPages).catch(() => {}); }
+
+  async function openPersonal(p) {
+    try {
+      const r = await api.getPersonalPage(p.id);
+      setPersonal({ page: p, html: r.html_code });
+    } catch (err) { toast(err.message); }
+  }
+
+  async function resetPersonal(p) {
+    if (!confirm('Remove your personalization for "' + p.name + '" and go back to the shared template?')) return;
+    try {
+      await api.resetPersonalPage(p.id);
+      toast('Reverted to the shared template.');
+      reloadPages();
+    } catch (err) { toast(err.message); }
+  }
 
   const license = user?.license;
   const remaining = license && license.expires_at ? new Date(license.expires_at).getTime() - Date.now() : null;
@@ -131,7 +152,7 @@ export default function Home() {
   useEffect(() => {
     if (!licenseActive) return;
     api.getStats().then(setStats).catch(() => {});
-    api.getPages().then(setPages).catch(() => {});
+    reloadPages();
   }, [licenseActive]);
 
   useEffect(() => {
@@ -204,10 +225,17 @@ export default function Home() {
             pages.map(p => (
               <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #1e2230' }}>
                 <div>
-                  <div style={{ fontWeight: 600, color: '#f1f5f9' }}>{p.name}</div>
+                  <div style={{ fontWeight: 600, color: '#f1f5f9' }}>
+                    {p.name}
+                    {p.has_variant && <span className="badge badge-green" style={{ marginLeft: 8 }}>Personalized</span>}
+                  </div>
                   <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{p.created}</div>
                 </div>
-                <span className={'badge ' + (p.status === 'active' ? 'badge-green' : 'badge-yellow')}>{p.status}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button className="btn btn-outline btn-sm" onClick={() => openPersonal(p)}>Personalize</button>
+                  {p.has_variant && <button className="btn btn-outline btn-sm" onClick={() => resetPersonal(p)}>Reset</button>}
+                  <span className={'badge ' + (p.status === 'active' ? 'badge-green' : 'badge-yellow')}>{p.status}</span>
+                </div>
               </div>
             ))
           )}
@@ -221,6 +249,20 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {personal && (
+        <PersonalizeModal
+          title={'Personalize: ' + personal.page.name}
+          initialHtml={personal.html}
+          onClose={() => setPersonal(null)}
+          onSave={async (html) => {
+            await api.savePersonalPage(personal.page.id, html);
+            toast('Your personalized version is live on all your deployments.');
+            setPersonal(null);
+            reloadPages();
+          }}
+        />
+      )}
     </div>
   );
 }

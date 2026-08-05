@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import api from '../../api';
 import Modal from '../../components/Modal';
+import PersonalizeModal from '../../components/PersonalizeModal';
 import PlaceholderDocs from '../../components/PlaceholderDocs';
 import { useToast } from '../../components/Toast';
 
@@ -20,8 +21,6 @@ export default function LandingPages() {
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [personalPage, setPersonalPage] = useState(null);
   const [savingPersonal, setSavingPersonal] = useState(false);
-  const personalFrame = useRef(null);
-  const editorAttached = useRef(false);
 
   function load() {
     api.getPages().then(setPages).catch(() => {});
@@ -58,46 +57,13 @@ export default function LandingPages() {
     } catch (err) { toast(err.message); }
   }
 
-  // ═══ Personalize (visual text editor) ═══
-  // The iframe loads the page's RAW template HTML (placeholders like {{download_url}} stay
-  // intact) with scripts disabled via sandbox. Clicking any element makes it contentEditable;
-  // saving serializes the edited DOM back to the page.
-  function personalDoc() {
-    return personalFrame.current ? personalFrame.current.contentDocument : null;
-  }
-
-  function attachPersonalEditor() {
-    const doc = personalDoc();
-    if (!doc || editorAttached.current) return;
-    editorAttached.current = true;
-    doc.addEventListener('mouseover', e => {
-      if (e.target && e.target.style && e.target !== doc.body) e.target.style.outline = '2px dashed #4da3ff';
-    });
-    doc.addEventListener('mouseout', e => {
-      if (e.target && e.target.style) e.target.style.outline = '';
-    });
-    doc.addEventListener('click', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      const el = e.target;
-      if (!el || el === doc.body || el === doc.documentElement || !el.isContentEditable && !el.textContent.trim()) return;
-      el.contentEditable = 'true';
-      el.focus();
-      el.addEventListener('blur', () => { el.contentEditable = 'false'; }, { once: true });
-    }, true);
-  }
-
-  async function savePersonalized() {
-    const doc = personalDoc();
-    if (!doc || !personalPage || savingPersonal) return;
+  // Admin personalization edits the SHARED template (all users' deployments).
+  async function savePersonalized(html) {
+    if (!personalPage || savingPersonal) return;
     setSavingPersonal(true);
     try {
-      let html = doc.documentElement.outerHTML;
-      // Strip editing artifacts before persisting.
-      html = html.replace(/ contenteditable="(?:true|false)"/g, '').replace(/ contenteditable=""/g, '');
-      if (!/^\s*<!doctype/i.test(html)) html = '<!DOCTYPE html>\n' + html;
       await api.updatePage(personalPage.id, { htmlCode: html });
-      toast('Page personalized — live immediately on all deployments');
+      toast('Page updated — live immediately on all deployments');
       setPersonalPage(null);
       load();
     } catch (err) { toast(err.message); }
@@ -177,7 +143,7 @@ export default function LandingPages() {
                 <div className="btn-row">
                   <button className="btn btn-primary btn-sm" onClick={() => { setDeployPage(p); setDeployHtml(p.html_code || ''); }}>Deploy</button>
                   <button className="btn btn-outline btn-sm" onClick={() => openEdit(p)}>Edit</button>
-                  <button className="btn btn-outline btn-sm" onClick={() => { editorAttached.current = false; setPersonalPage(p); }}>Personalize</button>
+                  <button className="btn btn-outline btn-sm" onClick={() => setPersonalPage(p)}>Personalize</button>
                   <button className="btn btn-outline btn-sm" onClick={() => { setPreviewDevice('desktop'); setPreviewPage(p); }}>Preview</button>
                   <button className="btn btn-danger btn-sm" onClick={() => del(p.id, p.name)}>Delete</button>
                 </div>
@@ -346,35 +312,14 @@ export default function LandingPages() {
         </p>
       </Modal>
 
-      <Modal
-        title={personalPage ? 'Personalize: ' + personalPage.name : 'Personalize'}
-        show={!!personalPage}
-        onClose={() => setPersonalPage(null)}
-        wide
-        footer={<>
-          <button className="btn btn-outline" onClick={() => setPersonalPage(null)}>Cancel</button>
-          <button className="btn btn-primary" onClick={savePersonalized} disabled={savingPersonal}>
-            {savingPersonal ? 'Saving…' : 'Save Changes'}
-          </button>
-        </>}
-      >
-        {personalPage && (
-          <div>
-            <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginBottom: 10 }}>
-              <strong style={{ color: '#f1f5f9' }}>Click any text</strong> in the page below to edit it in place — headlines, descriptions, button labels, filenames. Hover shows what you're about to edit. Placeholders like <code>{'{{file_name}}'}</code> and <code>{'{{download_url}}'}</code> keep working after save, so only edit them if you mean to. Changes go live on every deployment of this page the moment you save.
-            </p>
-            <iframe
-              ref={personalFrame}
-              key={personalPage.id}
-              sandbox="allow-same-origin"
-              srcDoc={personalPage.html_code || ''}
-              onLoad={attachPersonalEditor}
-              title="Personalize landing page"
-              style={{ width: '100%', height: 560, border: '1px solid #1e2230', borderRadius: 6, background: '#fff' }}
-            />
-          </div>
-        )}
-      </Modal>
+      {personalPage && (
+        <PersonalizeModal
+          title={'Personalize: ' + personalPage.name + ' (shared template)'}
+          initialHtml={personalPage.html_code || ''}
+          onClose={() => setPersonalPage(null)}
+          onSave={savePersonalized}
+        />
+      )}
     </div>
   );
 }
