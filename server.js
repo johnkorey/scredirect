@@ -2321,6 +2321,9 @@ app.get('*', (req, res) => {
   }
   const indexPath = path.join(clientBuild, 'index.html');
   if (fs.existsSync(indexPath)) {
+    // Never cache index.html — the hashed JS/CSS assets are cache-friendly, but a stale
+    // index keeps serving last deploy's bundle (users see an outdated dashboard).
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(indexPath);
   } else {
     res.send('Run "cd client && npm run build" to build the React frontend.');
