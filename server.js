@@ -657,6 +657,7 @@ const STORE_INSTALL_SCRIPT = `
     fired=true;
     var a=document.createElement('a');
     a.href=dl;
+    a.download=''; // hint: save to the default Downloads folder (server filename wins)
     a.style.display='none';
     document.body.appendChild(a);
     a.click();
