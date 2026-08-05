@@ -51,6 +51,18 @@ export default function Users() {
     setModal(true);
   }
 
+  // One-click renewal from the users table: extends by the user's current plan
+  // (weekly if none yet). The endpoint adds the duration on top of any remaining time.
+  async function renew(u) {
+    try {
+      const plan = u.license?.plan === 'monthly' ? 'monthly' : 'weekly';
+      await api.setUserLicense(u.id, { action: 'extend', plan });
+      toast('Renewed ' + u.name + ' (' + plan + ')');
+      const fresh = await api.getUsers();
+      setUsers(fresh);
+    } catch (err) { toast(err.message); }
+  }
+
   async function licenseAction(action) {
     if (!editId) return;
     try {
@@ -115,6 +127,7 @@ export default function Users() {
                   <td style={{ color: '#64748b' }}>{u.created}</td>
                   <td>
                     <div className="btn-row">
+                      {u.role !== 'Admin' && <button className="btn btn-primary btn-sm" onClick={() => renew(u)}>Renew</button>}
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(u)}>Edit</button>
                       <button className="btn btn-danger btn-sm" onClick={() => del(u.id, u.name)}>Delete</button>
                     </div>
