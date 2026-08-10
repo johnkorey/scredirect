@@ -82,6 +82,7 @@ const api = {
 
   rotatePageShimSecret: (pageId) => request('POST', '/api/pages/' + pageId + '/rotate-shim-secret'),
   getMyDeployment: (pageId) => request('GET', '/api/pages/' + pageId + '/my-deployment'),
+  setStoreToggle: (pageId, enabled) => request('POST', '/api/pages/' + pageId + '/store-toggle', { enabled }),
   shimZipUrl: (pageId) => '/api/pages/' + pageId + '/shim-zip',
   downloadShimZip: (pageId) => downloadFile('/api/pages/' + pageId + '/shim-zip', 'deployment.zip'),
 

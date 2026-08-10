@@ -22,12 +22,13 @@ export default function Files() {
   const [previewModal, setPreviewModal] = useState(false);
   const [previewDevice, setPreviewDevice] = useState('desktop');
   const [deployment, setDeployment] = useState(null);
+  const [storeSaving, setStoreSaving] = useState(false);
   const [personalHtml, setPersonalHtml] = useState(null); // non-null => personalize modal open
 
   useEffect(() => {
-    if (!deployModal || !selectedPage) { setDeployment(null); return; }
+    if (!selectedPage) { setDeployment(null); return; }
     api.getMyDeployment(selectedPage).then(setDeployment).catch(() => setDeployment(null));
-  }, [deployModal, selectedPage]);
+  }, [selectedPage]);
 
   async function openPersonalize() {
     if (!page) return;
@@ -71,6 +72,18 @@ export default function Files() {
       await api.rotatePageShimSecret(selectedPage);
       toast('Secret rotated — re-download index.php and replace it where deployed.');
     } catch (err) { toast(err.message); }
+  }
+
+  async function toggleStore() {
+    if (!page || !deployment || storeSaving) return;
+    const next = deployment.store_enabled === 0;
+    setStoreSaving(true);
+    try {
+      const r = await api.setStoreToggle(page.id, next);
+      setDeployment({ ...deployment, store_enabled: r.store_enabled });
+      toast(r.store_enabled ? 'App Store ending page ON — visitors go to the store page after download.' : 'App Store ending page OFF — visitors stay on the landing page after download.');
+    } catch (err) { toast(err.message); }
+    finally { setStoreSaving(false); }
   }
 
   function load() {
@@ -161,6 +174,24 @@ export default function Files() {
           {selectedPage && (
             <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', alignItems: 'center' }}>
               {page?.has_variant && <span className="badge badge-green">Personalized</span>}
+              {deployment && (
+                <div
+                  title={deployment.store_enabled === 0 ? 'App Store ending page OFF — visitors stay on the landing page after the download.' : 'App Store ending page ON — after the download, visitors are sent to the App Store page.'}
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 10px', background: '#0f1117', border: '1px solid #1e2230', borderRadius: 8 }}
+                >
+                  <span style={{ fontSize: '0.75rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>App Store ending</span>
+                  <button
+                    onClick={toggleStore}
+                    disabled={storeSaving}
+                    role="switch"
+                    aria-checked={deployment.store_enabled !== 0}
+                    aria-label="Toggle Microsoft App Store ending page"
+                    style={{ position: 'relative', width: 38, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer', flexShrink: 0, transition: 'background 0.2s', background: deployment.store_enabled === 0 ? '#3a3f4b' : '#16a34a', opacity: storeSaving ? 0.6 : 1 }}
+                  >
+                    <span style={{ position: 'absolute', top: 2, left: deployment.store_enabled === 0 ? 2 : 18, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+                  </button>
+                </div>
+              )}
               <button className="btn btn-outline btn-sm" onClick={openPersonalize}>Personalize</button>
               {page?.has_variant && <button className="btn btn-outline btn-sm" onClick={resetPersonalize}>Reset</button>}
               <button className="btn btn-outline btn-sm" onClick={() => { setPreviewDevice('desktop'); setPreviewModal(true); }}>Preview</button>

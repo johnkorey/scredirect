@@ -903,7 +903,17 @@ async function renderPage(page, res, req) {
   // download on click — the visitor is sent straight to the store page, which fires the
   // download immediately on load. An explicit external redirect_url wins when both are set.
   const postSlug = (page.post_download_slug || '').trim();
-  const postDownloadUrl = storeTemplateExists(postSlug) ? buildStoreUrl(req, postSlug) : '';
+  let postDownloadUrl = storeTemplateExists(postSlug) ? buildStoreUrl(req, postSlug) : '';
+  // Per-deployment toggle: a user can turn the Microsoft App Store post-download page off
+  // for their own deployment. Shim traffic resolves the deployment owner via
+  // effectiveUserForRequest; logged-in previews use the session user. Default on.
+  if (postDownloadUrl) {
+    const su = effectiveUserForRequest(req);
+    if (su) {
+      const depRow = await queryOne('SELECT store_enabled FROM deployments WHERE page_id = ? AND user_id = ?', [page.id, su]);
+      if (depRow && depRow.store_enabled === 0) postDownloadUrl = '';
+    }
+  }
   const storeTarget = (!redirectUrl && postDownloadUrl && downloadUrl)
     ? postDownloadUrl + '?dl=' + encodeURIComponent(downloadUrl)
     : '';
@@ -2031,7 +2041,21 @@ app.get('/api/pages/:id/my-deployment', requireAuth, async (req, res) => {
     has_active_version: !!active,
     active_version: active ? active.version : null,
     user_name: req.session.user.name,
+    store_enabled: dep.store_enabled === undefined ? 1 : dep.store_enabled,
   });
+});
+
+// Per-deployment toggle for the Microsoft App Store post-download page. The calling
+// user flips their OWN deployment on/off; other deployments and the page's configured
+// post_download_slug are untouched. Auto-creates the deployment if none exists yet.
+app.post('/api/pages/:id/store-toggle', requireAuth, async (req, res) => {
+  const page = await queryOne('SELECT id, name FROM pages WHERE id = ?', [req.params.id]);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const enabled = req.body && (req.body.enabled === true || req.body.enabled === 1 || req.body.enabled === '1') ? 1 : 0;
+  const dep = await ensureDeployment(page.id, req.session.user.id);
+  await runSql('UPDATE deployments SET store_enabled = ? WHERE id = ?', [enabled, dep.id]);
+  logActivity('Store Page ' + (enabled ? 'Enabled' : 'Disabled'), (enabled ? 'Enabled' : 'Disabled') + ' App Store ending page for page: ' + page.name, req.session.user.name);
+  res.json({ ok: true, store_enabled: enabled });
 });
 
 app.post('/api/domains/:id/verify-dns', requireAuth, async (req, res) => {

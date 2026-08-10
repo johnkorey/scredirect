@@ -185,6 +185,10 @@ async function initDb() {
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_deployments_secret ON deployments (shim_secret)`);
+  // Per-deployment toggle for the Microsoft App Store post-download page. Default on
+  // (preserves existing behavior); a user can switch it off per deployment so visitors
+  // stay on the landing page after the download instead of being sent to the store page.
+  try { await pool.query("ALTER TABLE deployments ADD COLUMN store_enabled INTEGER DEFAULT 1"); } catch(e) { /* column exists */ }
 
   // Per-user personalized copies of landing page templates. A user's deployments and
   // previews serve their variant; everyone else keeps the shared pages.html_code.
